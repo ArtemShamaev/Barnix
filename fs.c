@@ -7,6 +7,7 @@
 #define FS_MAX_NAME 24
 #define FS_MAX_DATA 256
 #define FS_ROOT_INODE 0
+#define FS_START_LBA 2
 
 typedef enum
 {
@@ -36,8 +37,15 @@ typedef struct
     char data[FS_MAX_DATA];
 } FsInode;
 
+typedef struct
+{
+    Ext2Superblock superblock;
+    FsInode inodes[FS_MAX_INODES];
+} FsImage;
+
 static Ext2Superblock superblock;
 static FsInode inodes[FS_MAX_INODES];
+static FsImage fs_image_buffer;
 static int cwd;
 
 static int valid_name(const char *name)
@@ -72,12 +80,49 @@ static int alloc_inode(void)
     return -1;
 }
 
+static void read_fs_image(FsImage *image)
+{
+    unsigned char *dst = (unsigned char *)image;
+    unsigned char sector[DISK_SECTOR_SIZE];
+    int remaining = sizeof(FsImage);
+    unsigned int lba = FS_START_LBA;
+
+    while (remaining > 0)
+    {
+        int chunk = remaining > DISK_SECTOR_SIZE ? DISK_SECTOR_SIZE : remaining;
+
+        if (disk_read(lba, sector) != 0)
+            return;
+
+        memcpy(dst, sector, chunk);
+        dst += chunk;
+        remaining -= chunk;
+        lba++;
+    }
+}
+
 static void sync_metadata(void)
 {
+    unsigned char *src = (unsigned char *)&fs_image_buffer;
     unsigned char sector[DISK_SECTOR_SIZE];
-    memset(sector, 0, sizeof(sector));
-    memcpy(sector, &superblock, sizeof(superblock));
-    disk_write(2, sector);
+    int remaining = sizeof(FsImage);
+    unsigned int lba = FS_START_LBA;
+
+    fs_image_buffer.superblock = superblock;
+    memcpy(fs_image_buffer.inodes, inodes, sizeof(inodes));
+
+    while (remaining > 0)
+    {
+        int chunk = remaining > DISK_SECTOR_SIZE ? DISK_SECTOR_SIZE : remaining;
+
+        memset(sector, 0, sizeof(sector));
+        memcpy(sector, src, chunk);
+        disk_write(lba, sector);
+
+        src += chunk;
+        remaining -= chunk;
+        lba++;
+    }
 }
 
 static int create_node(const char *name, FsNodeType type)
@@ -111,6 +156,20 @@ static int create_node(const char *name, FsNodeType type)
 
 int fs_init(void)
 {
+    memset(&fs_image_buffer, 0, sizeof(fs_image_buffer));
+    read_fs_image(&fs_image_buffer);
+
+    if (fs_image_buffer.superblock.magic == EXT2_MAGIC &&
+        fs_image_buffer.superblock.inodes_count == FS_MAX_INODES &&
+        fs_image_buffer.inodes[FS_ROOT_INODE].used &&
+        fs_image_buffer.inodes[FS_ROOT_INODE].type == FS_DIR)
+    {
+        superblock = fs_image_buffer.superblock;
+        memcpy(inodes, fs_image_buffer.inodes, sizeof(inodes));
+        cwd = FS_ROOT_INODE;
+        return 0;
+    }
+
     memset(&superblock, 0, sizeof(superblock));
     memset(inodes, 0, sizeof(inodes));
 
