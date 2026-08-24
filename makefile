@@ -8,6 +8,8 @@ LDFLAGS = -m elf_i386 -T linker.ld
 OBJS = \
 	boot.o \
 	kernel.o \
+	idt.o \
+	isr.o \
 	barnix.o \
 	fs.o \
 	disk.o \
@@ -30,6 +32,12 @@ boot.o: boot.S
 
 kernel.o: kernel.c
 	$(CC) $(CFLAGS) -c kernel.c -o kernel.o
+
+idt.o: idt.c
+	$(CC) $(CFLAGS) -c idt.c -o idt.o
+
+isr.o: isr.S
+	$(CC) $(CFLAGS) -c isr.S -o isr.o
 
 barnix.o: barnix.c
 	$(CC) $(CFLAGS) -c barnix.c -o barnix.o

@@ -148,7 +148,7 @@ int disk_init_from_memory(const void *image, unsigned int size)
     if (size > max_size)
         size = max_size;
 
-    memcpy(ram_disk, image, size);
+    memmove(ram_disk, image, size);
     return 0;
 }
 
