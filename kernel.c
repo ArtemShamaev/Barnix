@@ -28,6 +28,8 @@ typedef struct
 
 static int init_root_device(unsigned int magic, const MultibootInfo *mbi)
 {
+    println(WHITE, "checking multiboot info...");
+
     if (magic != MULTIBOOT_BOOTLOADER_MAGIC)
         panic("invalid multiboot magic");
 
@@ -36,6 +38,8 @@ static int init_root_device(unsigned int magic, const MultibootInfo *mbi)
 
     if (!(mbi->flags & MULTIBOOT_INFO_HAS_MODS) || mbi->mods_count == 0)
         panic("GRUB did not load /boot/fs.img module");
+
+    println(WHITE, "loading /boot/fs.img module...");
 
     MultibootModule *module = (MultibootModule *)mbi->mods_addr;
 
