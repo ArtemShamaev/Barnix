@@ -22,13 +22,17 @@
 #define ATA_SR_DRQ 0x08
 #define ATA_SR_BSY 0x80
 
-static unsigned char ram_disk[DISK_SECTORS][DISK_SECTOR_SIZE];
+static unsigned char fallback_ram_disk[DISK_SECTORS][DISK_SECTOR_SIZE];
+static unsigned char *ram_disk_data = (unsigned char *)fallback_ram_disk;
+static unsigned int ram_disk_sectors = DISK_SECTORS;
 static int use_ata_disk;
 
-static void init_ram_disk(void)
+static void init_empty_ram_disk(void)
 {
     use_ata_disk = 0;
-    memset(ram_disk, 0, sizeof(ram_disk));
+    ram_disk_data = (unsigned char *)fallback_ram_disk;
+    ram_disk_sectors = DISK_SECTORS;
+    memset(fallback_ram_disk, 0, sizeof(fallback_ram_disk));
 }
 
 static inline unsigned char inb(unsigned short port)
@@ -134,21 +138,23 @@ int disk_init(void)
 {
     use_ata_disk = (ata_identify() == 0);
     if (!use_ata_disk)
-        init_ram_disk();
+        init_empty_ram_disk();
 
     return 0;
 }
 
 int disk_init_from_memory(const void *image, unsigned int size)
 {
-    unsigned int max_size = DISK_SECTORS * DISK_SECTOR_SIZE;
+    if (!image || size < DISK_SECTOR_SIZE)
+        return -1;
 
-    init_ram_disk();
+    use_ata_disk = 0;
+    ram_disk_data = (unsigned char *)image;
+    ram_disk_sectors = size / DISK_SECTOR_SIZE;
 
-    if (size > max_size)
-        size = max_size;
+    if (ram_disk_sectors > DISK_SECTORS)
+        ram_disk_sectors = DISK_SECTORS;
 
-    memmove(ram_disk, image, size);
     return 0;
 }
 
@@ -159,7 +165,10 @@ int disk_read(unsigned int lba, void *buffer)
 
     if (!use_ata_disk)
     {
-        memcpy(buffer, ram_disk[lba], DISK_SECTOR_SIZE);
+        if (lba >= ram_disk_sectors)
+            return -1;
+
+        memcpy(buffer, ram_disk_data + (lba * DISK_SECTOR_SIZE), DISK_SECTOR_SIZE);
         return 0;
     }
 
@@ -184,7 +193,10 @@ int disk_write(unsigned int lba, const void *buffer)
 
     if (!use_ata_disk)
     {
-        memcpy(ram_disk[lba], buffer, DISK_SECTOR_SIZE);
+        if (lba >= ram_disk_sectors)
+            return -1;
+
+        memcpy(ram_disk_data + (lba * DISK_SECTOR_SIZE), buffer, DISK_SECTOR_SIZE);
         return 0;
     }
 

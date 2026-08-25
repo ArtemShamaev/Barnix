@@ -80,7 +80,7 @@ static int alloc_inode(void)
     return -1;
 }
 
-static void read_fs_image(FsImage *image)
+static int read_fs_image(FsImage *image)
 {
     unsigned char *dst = (unsigned char *)image;
     unsigned char sector[DISK_SECTOR_SIZE];
@@ -92,16 +92,18 @@ static void read_fs_image(FsImage *image)
         int chunk = remaining > DISK_SECTOR_SIZE ? DISK_SECTOR_SIZE : remaining;
 
         if (disk_read(lba, sector) != 0)
-            return;
+            return -1;
 
         memcpy(dst, sector, chunk);
         dst += chunk;
         remaining -= chunk;
         lba++;
     }
+
+    return 0;
 }
 
-static void sync_metadata(void)
+static int sync_metadata(void)
 {
     unsigned char *src = (unsigned char *)&fs_image_buffer;
     unsigned char sector[DISK_SECTOR_SIZE];
@@ -117,12 +119,15 @@ static void sync_metadata(void)
 
         memset(sector, 0, sizeof(sector));
         memcpy(sector, src, chunk);
-        disk_write(lba, sector);
+        if (disk_write(lba, sector) != 0)
+            return -1;
 
         src += chunk;
         remaining -= chunk;
         lba++;
     }
+
+    return 0;
 }
 
 static int create_node(const char *name, FsNodeType type)
@@ -150,14 +155,14 @@ static int create_node(const char *name, FsNodeType type)
     inodes[ino].parent = cwd;
     strncpy(inodes[ino].name, name, FS_MAX_NAME - 1);
     inodes[ino].name[FS_MAX_NAME - 1] = 0;
-    sync_metadata();
-    return 0;
+    return sync_metadata();
 }
 
 int fs_init(void)
 {
     memset(&fs_image_buffer, 0, sizeof(fs_image_buffer));
-    read_fs_image(&fs_image_buffer);
+    if (read_fs_image(&fs_image_buffer) != 0)
+        return -1;
 
     if (fs_image_buffer.superblock.magic == EXT2_MAGIC &&
         fs_image_buffer.superblock.inodes_count == FS_MAX_INODES &&
@@ -187,8 +192,7 @@ int fs_init(void)
     strcpy(inodes[FS_ROOT_INODE].name, "/");
     cwd = FS_ROOT_INODE;
 
-    sync_metadata();
-    return 0;
+    return sync_metadata();
 }
 
 void fs_ls(void)
@@ -271,8 +275,7 @@ int fs_write(const char *name, const char *data, int size)
     memcpy(inodes[ino].data, data, size);
     inodes[ino].data[size] = 0;
     inodes[ino].size = size;
-    sync_metadata();
-    return 0;
+    return sync_metadata();
 }
 
 int fs_rm(const char *name)
@@ -286,6 +289,5 @@ int fs_rm(const char *name)
 
     memset(&inodes[ino], 0, sizeof(FsInode));
     superblock.free_inodes_count++;
-    sync_metadata();
-    return 0;
+    return sync_metadata();
 }
