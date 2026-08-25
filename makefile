@@ -6,7 +6,10 @@ CFLAGS = -m32 -ffreestanding -nostdlib -fno-pie -fno-pic -fno-stack-protector -W
 LDFLAGS = -m elf_i386 -T linker.ld
 
 OBJS = \
+	boot.o \
 	kernel.o \
+	idt.o \
+	isr.o \
 	barnix.o \
 	fs.o \
 	disk.o \
@@ -24,8 +27,17 @@ all: barnix.iso
 # Compile
 # =========================
 
+boot.o: boot.S
+	$(CC) $(CFLAGS) -c boot.S -o boot.o
+
 kernel.o: kernel.c
 	$(CC) $(CFLAGS) -c kernel.c -o kernel.o
+
+idt.o: idt.c
+	$(CC) $(CFLAGS) -c idt.c -o idt.o
+
+isr.o: isr.S
+	$(CC) $(CFLAGS) -c isr.S -o isr.o
 
 barnix.o: barnix.c
 	$(CC) $(CFLAGS) -c barnix.c -o barnix.o
@@ -59,13 +71,17 @@ kernel.elf: $(OBJS)
 barnix.img:
 	dd if=/dev/zero of=barnix.img bs=1M count=32
 
+fs.img:
+	dd if=/dev/zero of=fs.img bs=512 count=4096
+
 # =========================
 # ISO
 # =========================
 
-barnix.iso: kernel.elf barnix.img grub.cfg
+barnix.iso: kernel.elf fs.img barnix.img grub.cfg
 	mkdir -p $(GRUB_DIR)
 	cp kernel.elf $(BOOT_DIR)/
+	cp fs.img $(BOOT_DIR)/
 	cp grub.cfg $(GRUB_DIR)/
 	grub-mkrescue -o barnix.iso $(ISO_DIR)
 
@@ -77,7 +93,7 @@ run: barnix.iso
 	qemu-system-i386 \
 		-m 256M \
 		-cdrom barnix.iso \
-		-hda barnix.img
+		-drive file=barnix.img,format=raw,if=ide
 
 # =========================
 # Clean
@@ -87,6 +103,7 @@ clean:
 	rm -f *.o
 	rm -f kernel.elf
 	rm -f barnix.iso
+	rm -f fs.img
 	rm -rf iso
 
 distclean: clean

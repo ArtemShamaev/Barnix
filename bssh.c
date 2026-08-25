@@ -6,7 +6,6 @@
 
 static char cmd[MAX_CMD];
 static char *argv[MAX_ARGS];
-static int current_dir = 0;
 /* =========================================================
    split command -> argv
    ========================================================= */
@@ -39,7 +38,7 @@ static void cmd_help(void)
     println(WHITE, "ls          - list files");
     println(WHITE, "cat <file>  - print file");
     println(WHITE, "touch <f>   - create file");
-    println(WHITE, "write f txt - write text");
+    println(WHITE, "write txt f - write text");
     println(WHITE, "rm <file>   - remove file");
     println(WHITE, "echo text   - print text");
     println(WHITE, "panic       - crash system");
@@ -125,23 +124,12 @@ static void exec_cmd(int argc)
     {
         if (argc < 3)
         {
-            println(RED, "usage: write <file> <text>");
+            println(RED, "usage: write <text> <file>");
             return;
         }
 
-        /* собрать текст обратно */
-        char buffer[64];
-        buffer[0] = 0;
-
-        for (int i = 2; i < argc; i++)
-        {
-            strcat(buffer, argv[i]);
-
-            if (i + 1 < argc)
-                strcat(buffer, " ");
-        }
-
-        fs_write(argv[1], buffer, strlen(buffer));
+        /* write <text> <file>: text is argv[1], file is argv[2] */
+        fs_write(argv[2], argv[1], strlen(argv[1]));
         return;
     }
 
