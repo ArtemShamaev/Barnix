@@ -1,0 +1,10 @@
+*.o
+*.d
+/kernel.elf
+/barnix.iso
+/barnix.img
+/iso/
+/tests/fs_test
+
+/barnix-ext2.img
+/live-ext2.img

@@ -1,12 +1,12 @@
 #include "barnix.h"
 #include "fs.h"
+#include "disk.h"
 
 #define MAX_CMD 128
-#define MAX_ARGS 8
+#define MAX_ARGS (MAX_CMD / 2)
 
 static char cmd[MAX_CMD];
 static char *argv[MAX_ARGS];
-static int current_dir = 0;
 /* =========================================================
    split command -> argv
    ========================================================= */
@@ -41,6 +41,16 @@ static void cmd_help(void)
     println(WHITE, "touch <f>   - create file");
     println(WHITE, "write f txt - write text");
     println(WHITE, "rm <file>   - remove file");
+    println(WHITE, "mkdir / cd  - create / enter directory");
+    println(WHITE, "pwd         - current directory");
+    println(WHITE, "rmdir <dir> - remove empty directory");
+    println(WHITE, "cp src dst  - copy file (new name)");
+    println(WHITE, "mv old new  - rename file or directory");
+    println(WHITE, "append f txt- append text (no added newline)");
+    println(WHITE, "stat <name> - file or directory details");
+    println(WHITE, "df          - filesystem usage and limits");
+    println(WHITE, "diskinfo    - disk type and capacity");
+    println(WHITE, "sync        - save filesystem to disk");
     println(WHITE, "echo text   - print text");
     println(WHITE, "panic       - crash system");
     println(WHITE, "");
@@ -56,10 +66,37 @@ static void cmd_echo(int argc)
     }
     println(WHITE, "");
 }
+static void report_result(int result)
+{
+    if (result != 0)
+        println(RED, "operation failed (check name, type, space or disk)");
+}
+
 static void exec_cmd(int argc)
 {
     if (argc == 0)
         return;
+
+    if (strcmp(argv[0], "pwd") == 0) { fs_pwd(); return; }
+    if (strcmp(argv[0], "df") == 0) { fs_df(); return; }
+    if (strcmp(argv[0], "diskinfo") == 0) { disk_info(); return; }
+    if (strcmp(argv[0], "sync") == 0)
+    {
+        if (fs_sync() == 0) println(GREEN, "filesystem saved");
+        return;
+    }
+    if (strcmp(argv[0], "stat") == 0 || strcmp(argv[0], "rmdir") == 0)
+    {
+        if (argc != 2) { println(RED, "usage: stat <name> / rmdir <dir>"); return; }
+        report_result(strcmp(argv[0], "stat") == 0 ? fs_stat(argv[1]) : fs_rmdir(argv[1]));
+        return;
+    }
+    if (strcmp(argv[0], "cp") == 0 || strcmp(argv[0], "mv") == 0)
+    {
+        if (argc != 3) { println(RED, "usage: cp <src> <dst> / mv <old> <new>"); return; }
+        report_result(strcmp(argv[0], "cp") == 0 ? fs_cp(argv[1], argv[2]) : fs_mv(argv[1], argv[2]));
+        return;
+    }
 
     /* help */
     if (strcmp(argv[0], "help") == 0)
@@ -104,7 +141,7 @@ static void exec_cmd(int argc)
             return;
         }
 
-        fs_touch(argv[1]);
+        report_result(fs_touch(argv[1]));
         return;
     }
 
@@ -117,20 +154,20 @@ static void exec_cmd(int argc)
             return;
         }
 
-        fs_rm(argv[1]);
+        report_result(fs_rm(argv[1]));
         return;
     }
     /* write */
-    if (strcmp(argv[0], "write") == 0)
+    if (strcmp(argv[0], "write") == 0 || strcmp(argv[0], "append") == 0)
     {
         if (argc < 3)
         {
-            println(RED, "usage: write <file> <text>");
+            println(RED, "usage: write/append <file> <text>");
             return;
         }
 
         /* собрать текст обратно */
-        char buffer[64];
+        char buffer[MAX_CMD];
         buffer[0] = 0;
 
         for (int i = 2; i < argc; i++)
@@ -141,7 +178,9 @@ static void exec_cmd(int argc)
                 strcat(buffer, " ");
         }
 
-        fs_write(argv[1], buffer, strlen(buffer));
+        report_result(strcmp(argv[0], "append") == 0 ?
+            fs_append(argv[1], buffer, strlen(buffer)) :
+            fs_write(argv[1], buffer, strlen(buffer)));
         return;
     }
 
@@ -165,7 +204,7 @@ static void exec_cmd(int argc)
             return;
         }
     
-        fs_mkdir(argv[1]);
+        report_result(fs_mkdir(argv[1]));
         return;
     }
     

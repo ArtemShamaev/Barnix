@@ -1,8 +1,7 @@
 #include "barnix.h"
 #include "fs.h"
 #include "disk.h"
-extern unsigned int _binary_fs_img_start;
-extern unsigned int _binary_fs_img_end;
+#include "multiboot.h"
 __attribute__((section(".multiboot"), used))
 const unsigned int multiboot_header[] = {
     0x1BADB002,
@@ -12,27 +11,33 @@ const unsigned int multiboot_header[] = {
 void bssh_main(void);
 
 
-void kernel_main(void)
+static int mount_live(const MultibootInfo *info)
+{
+    if (!(info->flags & MULTIBOOT_MODULES) || !info->module_count || !info->modules)
+        return -1;
+    const MultibootModule *module = (const MultibootModule *)info->modules;
+    if (module->end <= module->start ||
+        disk_init_from_memory((const void *)module->start, module->end - module->start))
+        return -1;
+    if (fs_init()) return -1;
+    println(YELLOW, "CD/DVD live mode: changes are stored in RAM only");
+    return 0;
+}
+
+void kernel_main(unsigned int magic, const MultibootInfo *info)
 {
     clear();
 
     println(CYAN, "Barnix OS starting...");
 
-    /* 1. disk first */
-    if (disk_init() != 0)
-    {
-        println(RED, "disk init failed");
-        while (1);
-    }
+    if (magic != MULTIBOOT_BOOT_MAGIC || !info)
+        panic("Multiboot boot information missing");
 
-    println(GREEN, "disk ready");
-
-    /* 2. fs after disk */
-    if (fs_init() != 0)
-    {
-        println(RED, "fs init failed");
-        while (1);
-    }
+    int live_only = (info->flags & MULTIBOOT_CMDLINE) && info->command_line &&
+                    strcmp((const char *)info->command_line, "live") == 0;
+    int ready = !live_only && disk_init() == 0 && fs_init() == 0;
+    if (!ready && mount_live(info) != 0)
+        panic("No supported ext2 disk or CD/DVD filesystem module");
 
     println(GREEN, "fs ready");
 
