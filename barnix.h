@@ -17,6 +17,7 @@ enum {
 void clear(void);
 void print(int color, const char *str);
 void println(int color, const char *str);
+void console_finish_line(void);
 void printll(int color, const char *str);
 int strlen(const char *str);
 int strcmp(const char *str1, const char *str2);

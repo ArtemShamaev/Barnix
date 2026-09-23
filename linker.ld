@@ -26,4 +26,14 @@ SECTIONS
         *(COMMON)
         *(.bss*)
     }
+    ASSERT(. <= 0x01000000, "Kernel overlaps application arena")
+    .app_arena 0x01000000 (NOLOAD) :
+    {
+        . += 0x00400000;
+    }
+    /* Three process snapshots, separate from the running 16..20 MiB arena. */
+    .task_arena 0x01400000 (NOLOAD) :
+    {
+        . += 0x00c00000;
+    }
 }
