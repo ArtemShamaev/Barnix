@@ -39,6 +39,12 @@ gdt_start:
     .quad 0x0000000000000000
     .quad 0x00CF9A000000FFFF
     .quad 0x00CF92000000FFFF
+    /* Ring-3 flat code/data segments for Linux compatibility tasks. */
+    .quad 0x00CFFA000000FFFF
+    .quad 0x00CFF2000000FFFF
+    .global gdt_tss_descriptor
+gdt_tss_descriptor:
+    .quad 0
 gdt_end:
 
 gdt_descriptor:
@@ -49,6 +55,7 @@ gdt_descriptor:
 .align 16
 kernel_stack_bottom:
 .skip 16384
+.global kernel_stack_top
 kernel_stack_top:
 
 .section .note.GNU-stack,"",@progbits

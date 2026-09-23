@@ -1,5 +1,6 @@
 #include "barnix.h"
 #include "keyboard.h"
+#include "text.h"
 /* =========================================================
    Barnix I/O Library Implementation
    Copyright (C) Barnino Systems, all rights reserved.
@@ -12,11 +13,13 @@ static unsigned short *vga_buffer = (unsigned short *)VGA_ADDRESS;
 /* Текущая позиция курсора */
 static int cursor_x = 0;
 static int cursor_y = 0;
+static char input_history[16][128];
+static unsigned int input_history_count;
 
 /* ==================== ВНУТРЕННИЕ ФУНКЦИИ ==================== */
 
 /* Установка курсора */
-static void set_cursor(int x, int y) {
+void set_cursor(int x, int y) {
     cursor_x = x;
     cursor_y = y;
     unsigned short pos = y * VGA_WIDTH + x;
@@ -40,7 +43,7 @@ static void set_cursor(int x, int y) {
 }
 
 /* Вывод символа */
-static void putchar(char c, int color) {
+static void putchar(unsigned char c, int color) {
     if (c == '\n') {
         cursor_x = 0;
         cursor_y++;
@@ -84,17 +87,25 @@ void clear(void) {
 }
 
 /* Вывод строки без переноса */
+static Utf8Decoder output_decoder;
 void print(int color, const char *str) {
     while (*str) {
-        putchar(*str, color);
-        str++;
+        unsigned int codes[2];
+        int n = utf8_feed(&output_decoder, (unsigned char)*str++, codes);
+        for (int i = 0; i < n; i++) putchar(text_glyph(codes[i]), color);
     }
+}
+
+/* Keep shell status messages separate without changing program output bytes. */
+void console_finish_line(void)
+{
+    if (cursor_x) print(WHITE, "\n");
 }
 
 /* Вывод строки с переносом */
 void println(int color, const char *str) {
     print(color, str);
-    putchar('\n', color);
+    print(color, "\n");
 }
 
 /* Вывод с [OK] в начале (зеленый) */
@@ -172,29 +183,74 @@ char* strstr(const char *haystack, const char *needle) {
 /* Ввод строки с приглашением */
 void input(char *buffer, int max_length, const char *prompt) {
     print(WHITE, prompt);
-    
+    int start_x = cursor_x, start_y = cursor_y;
     int pos = 0;
-    
+    int history_position = (int)input_history_count;
     /* Очищаем буфер */
     for (int i = 0; i < max_length; i++) {
         buffer[i] = '\0';
     }
     
     while (1) {
-        unsigned char ch = getch();
+        unsigned int ch = getch();
+
+        if (ch == KEY_UP || ch == KEY_DOWN) {
+            if (ch == KEY_UP && history_position > 0) history_position--;
+            else if (ch == KEY_DOWN && history_position < (int)input_history_count) history_position++;
+            else continue;
+            if (history_position < (int)input_history_count) strcpy(buffer, input_history[history_position]);
+            else buffer[0] = 0;
+            pos = strlen(buffer);
+            for (int y = start_y; y < start_y + 3 && y < VGA_HEIGHT; y++)
+                for (int x = y == start_y ? start_x : 0; x < VGA_WIDTH; x++)
+                    vga_buffer[y * VGA_WIDTH + x] = (MAKE_ATTR(WHITE) << 8) | ' ';
+            set_cursor(start_x, start_y); print(WHITE, buffer);
+            continue;
+        }
+        if (ch == '\t' && pos > 0) {
+            int end = pos, begin = 0;
+            while (begin < end && buffer[begin] == ' ') begin++;
+            while (begin < end && buffer[begin] != ' ') begin++;
+            if (begin == end) {
+                static const char *commands[] = {
+                    "ls","pwd","df","diskinfo","devices","clear","touch","rm",
+                    "mkdir","cd","rmdir","stat","cp","mv","write","append","cat",
+                    "echo","panic","sync","mount","unmount","help","init","macro",
+                    "bnm","get","git","true","false","linux"
+                };
+                int match = -1, matches = 0;
+                for (unsigned int i = 0; i < sizeof(commands) / sizeof(commands[0]); i++)
+                    if (!strncmp(commands[i], buffer, pos)) { match = (int)i; matches++; }
+                if (matches == 1) { strcpy(buffer, commands[match]); pos = strlen(buffer); }
+                for (int y = start_y; y < start_y + 3 && y < VGA_HEIGHT; y++)
+                    for (int x = y == start_y ? start_x : 0; x < VGA_WIDTH; x++)
+                        vga_buffer[y * VGA_WIDTH + x] = (MAKE_ATTR(WHITE) << 8) | ' ';
+                set_cursor(start_x, start_y); print(WHITE, buffer);
+            }
+            continue;
+        }
         
         /* Enter */
         if (ch == '\n') {
             buffer[pos] = '\0';
             putchar('\n', WHITE);
+            if (pos && (!input_history_count || strcmp(input_history[input_history_count - 1], buffer))) {
+                if (input_history_count == 16) {
+                    for (int i = 1; i < 16; i++) strcpy(input_history[i - 1], input_history[i]);
+                    input_history_count--;
+                }
+                strcpy(input_history[input_history_count++], buffer);
+            }
             break;
         }
         
         /* Backspace */
         if (ch == 0x08) {
             if (pos > 0) {
-                pos--;
-                cursor_x--;
+                do { pos--; } while (pos > 0 && ((unsigned char)buffer[pos] & 0xc0) == 0x80);
+                buffer[pos] = 0;
+                if (cursor_x == 0 && cursor_y > 0) { cursor_y--; cursor_x = VGA_WIDTH; }
+                if (cursor_x > 0) cursor_x--;
                 unsigned short attribute = (MAKE_ATTR(WHITE) << 8);
                 vga_buffer[cursor_y * VGA_WIDTH + cursor_x] = attribute | ' ';
                 set_cursor(cursor_x, cursor_y);
@@ -203,10 +259,13 @@ void input(char *buffer, int max_length, const char *prompt) {
         }
         
         /* Обычный символ */
-        if (ch >= 32 && ch <= 126 && pos < max_length - 1) {
-            buffer[pos] = ch;
-            putchar(ch, WHITE);
-            pos++;
+        if (ch >= 32 && ch != 127) {
+            char encoded[4]; unsigned int n = utf8_encode(ch, encoded);
+            if (pos + (int)n < max_length) {
+                for (unsigned int i = 0; i < n; i++) buffer[pos++] = encoded[i];
+                buffer[pos] = 0;
+                putchar(text_glyph(ch), WHITE);
+            }
         }
     }
 }

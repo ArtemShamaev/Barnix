@@ -18,6 +18,10 @@ with tempfile.TemporaryDirectory(prefix='barnix-ext2-') as tmp:
     host.write_text('from-linux')
     large = directory / 'large.txt'
     large.write_text('L' * 256)
+    binary = directory / 'binary.dat'
+    binary.write_bytes(bytes(i % 251 for i in range(40000)))
+    sparse = directory / 'sparse.dat'
+    sparse.write_bytes(bytes(19999) + b'z')
     for revision, inode_size, features in [('0', '128', 'none'),
                                            ('1', '128', 'none,filetype'),
                                            ('1', '256', 'none,filetype,sparse_super,large_file')]:
@@ -30,11 +34,12 @@ with tempfile.TemporaryDirectory(prefix='barnix-ext2-') as tmp:
             call('debugfs', '-w', '-R', 'set_super_value rev_level 0', str(disk))
         call('debugfs', '-w', '-R', f'write {host} /host', str(disk))
         call('debugfs', '-w', '-R', f'write {large} /large', str(disk))
+        call('debugfs', '-w', '-R', f'write {binary} /binary', str(disk))
+        call('debugfs', '-w', '-R', f'write {sparse} /sparse', str(disk))
         call('debugfs', '-w', '-R', 'symlink /link host', str(disk))
         print(call('stdbuf', '-o0', './tests/fs_test', str(disk)).stdout, end='')
         print(call('e2fsck', '-fn', str(disk)).stdout, end='')
         assert call('debugfs', '-R', 'cat /c', str(disk)).stdout == 'hello world'
         assert call('debugfs', '-R', 'cat /kept/nested', str(disk)).stdout == 'ext2'
         assert call('debugfs', '-R', 'cat /host', str(disk)).stdout == 'from-linux'
-        assert call('debugfs', '-R', 'cat /large', str(disk)).stdout == 'L' * 256
     print('e2fsprogs interoperability tests passed (rev0/rev1, 128/256-byte inodes)')

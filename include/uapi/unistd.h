@@ -1,0 +1,57 @@
+#ifndef BARNIX_UAPI_UNISTD_H
+#define BARNIX_UAPI_UNISTD_H
+/* Linux i386 int 0x80 syscall numbers, not x86-64 syscall numbers. */
+#define __NR_exit 1
+#define __NR_fork 2
+#define __NR_read 3
+#define __NR_write 4
+#define __NR_open 5
+#define __NR_close 6
+#define __NR_waitpid 7
+#define __NR_execve 11
+#define __NR_chdir 12
+#define __NR_dup 41
+#define __NR_pipe 42
+#define __NR_pipe2 331
+#define __NR_dup2 63
+#define __NR_getuid 24
+#define __NR_geteuid 49
+#define __NR_uname 122
+#define __NR_readlink 85
+#define __NR_getppid 64
+#define __NR_set_tid_address 258
+#define __NR_ioctl 54
+#define __NR_fcntl 55
+#define __NR_setpgid 57
+#define __NR_getpgrp 65
+#define __NR_rt_sigaction 174
+#define __NR_rt_sigprocmask 175
+#define __NR_nanosleep 162
+#define __NR_gettimeofday 78
+#define __NR_clock_gettime 265
+#define __NR_times 43
+#define __NR_getdents 141
+#define __NR_select 82
+#define __NR_readv 145
+#define __NR_writev 146
+#define __NR_poll 168
+#define __NR_lseek 19
+#define __NR_getpid 20
+#define __NR_access 33
+#define __NR_brk 45
+#define __NR_mmap 90
+#define __NR_munmap 91
+#define __NR_mmap2 192
+#define __NR_stat 106
+#define __NR_fstat 108
+#define __NR_stat64 195
+#define __NR_getcwd 183
+#define __NR_exit_group 252
+#define __NR_getgid 47
+#define __NR_getegid 50
+#define __NR_getuid32 199
+#define __NR_getgid32 200
+#define __NR_geteuid32 201
+#define __NR_getegid32 202
+#define __NR_sched_yield 158
+#endif

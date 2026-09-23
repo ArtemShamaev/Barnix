@@ -1,65 +1,27 @@
 """Smoke-test the built ISO using a temporary disk and QEMU's VGA memory."""
 import pathlib
+import shutil
 import subprocess
 import tempfile
 import time
 
 
-def run(disk, directory, commands, live_only=False):
-    args = ['qemu-system-i386', '-m', '256M', '-boot', 'd', '-cdrom', 'barnix.iso',
-            '-display', 'none', '-serial', 'none', '-monitor', 'stdio', '-no-reboot']
-    if disk is not None:
-        args += ['-drive', f'file={disk},format=raw,if=ide']
-    process = subprocess.Popen(
-        args,
-        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+from qemu_shell import run
 
-    def monitor(command):
-        process.stdin.write((command + '\n').encode())
-        process.stdin.flush()
 
-    def screen():
-        destination = directory / 'vga.bin'
-        monitor(f'pmemsave 0xb8000 4000 "{destination}"')
-        time.sleep(0.2)
-        data = destination.read_bytes()[::2]
-        return '\n'.join(data[i:i + 80].decode('ascii', errors='replace').rstrip()
-                         for i in range(0, 2000, 80))
-
-    try:
-        time.sleep(2)
-        if live_only:
-            monitor('sendkey down')
-            time.sleep(0.2)
-        monitor('sendkey ret')
-        time.sleep(2)
-        assert 'bssh>' in screen(), 'Shell did not start'
-        for command, expected in commands:
-            for character in command:
-                key = {' ': 'spc', '.': 'dot', '/': 'slash'}.get(character, character)
-                monitor(f'sendkey {key} 1')
-                time.sleep(0.025)
-            monitor('sendkey ret 1')
-            time.sleep(0.25)
-            text = screen()
-            assert expected in text, (command, expected, text)
-        print('Shell sequence passed')
-        monitor('quit')
-        process.wait(timeout=5)
-    finally:
-        if process.poll() is None:
-            process.terminate()
-            process.wait(timeout=5)
-
+# Program counts change as userland migrates; account for the actual template.
+base_free_inodes = int.from_bytes(pathlib.Path("live-ext2.img").read_bytes()[1040:1044], "little")
 
 with tempfile.TemporaryDirectory(prefix='barnix-shell-') as temporary:
     directory = pathlib.Path(temporary)
     disk = directory / 'test.img'
-    with disk.open('wb') as image:
-        image.truncate(2 * 1024 * 1024)
-    subprocess.run(['mke2fs', '-q', '-t', 'ext2', '-F', '-b', '1024',
-                    '-I', '128', '-N', '64', '-O', 'none,filetype', str(disk)], check=True)
+    shutil.copyfile('live-ext2.img', disk)
     run(disk, directory, [
+        ('help', 'run a Barnix ELF32 program'),
+        ('/bin/echo absolute', 'absolute'),
+        ('./bin/echo relative', 'relative'),
+        ('hello.elf argcheck', 'program exited: 7'),
+        ('hello.elf again', 'program exited: 7'),
         ('write a hello', 'bssh>'),
         ('append a world', 'bssh>'),
         ('cp a b', 'bssh>'),
@@ -71,11 +33,14 @@ with tempfile.TemporaryDirectory(prefix='barnix-shell-') as temporary:
         ('pwd', '/docs'),
         ('cd ..', 'bssh>'),
         ('rmdir docs', 'bssh>'),
-        ('df', 'Free inodes: 51 / 64'),
+        ('df', f'Free inodes: {base_free_inodes - 2} / 64'),
         ('diskinfo', 'Device sectors (512 bytes): 4096'),
         ('sync', 'filesystem saved'),
+        ('unmount', 'filesystem unmounted'),
+        ('mount', 'no filesystem mounted'),
+        ('mount ram0 /', 'mounted ram0 on /'),
     ])
-    run(disk, directory, [('cat c', 'helloworld'), ('df', 'Free inodes: 51 / 64')])
+    run(disk, directory, [('cat c', 'helloworld'), ('df', f'Free inodes: {base_free_inodes - 2} / 64')])
     subprocess.run(['e2fsck', '-fn', str(disk)], check=True)
     result = subprocess.run(['debugfs', '-R', 'cat /c', str(disk)], capture_output=True, text=True, check=True)
     assert result.stdout == 'helloworld'
@@ -91,7 +56,7 @@ with tempfile.TemporaryDirectory(prefix='barnix-shell-') as temporary:
         ('sync', 'filesystem saved'),
     ])
     run(None, directory, [('stat optical', 'operation failed'),
-                          ('df', 'Free inodes: 53 / 64')])
+                          ('df', f'Free inodes: {base_free_inodes} / 64')])
     before = disk.read_bytes()
     run(disk, directory, [('diskinfo', 'Device: RAM disk (volatile)'),
                           ('write live temporary', 'bssh>'),
@@ -103,3 +68,14 @@ with tempfile.TemporaryDirectory(prefix='barnix-shell-') as temporary:
                           ('write fallback ram', 'bssh>')])
     assert disk.read_bytes() == bytes(2 * 1024 * 1024)
     print('CD/DVD boot, RAM writes, volatile restart, and ATA isolation tests passed')
+
+with tempfile.TemporaryDirectory(prefix='barnix-exec-') as temporary:
+    run(None, pathlib.Path(temporary), [
+        ('write bad notelf', 'program exited: 0'),
+        ('./bad', 'ELF: truncated ELF header'),
+        ('cd bin', 'program exited: 0'),
+        ('rm echo', 'program exited: 0'),
+        ('echo absent', 'command not found'),
+        ('./help', 'run a Barnix ELF32 program'),
+        ('clear', 'program exited: 0'),
+    ])
