@@ -1,5 +1,38 @@
 # Barnix
 ## Кароче:
+Распакуешь скаченный репо (там около 1 гб)
+В нём распакуй РАСПАКУЙ.zip
+И так будет make-3.81.exe
+и qemu-w64-setup_что-то-там.exe
+Их запускаешь, по класике inosetup Далее, Далее и т.д.
+
+Потом из папки Barnix в cmd
+make run
+
+Откроется Qemu. Там и будет Barnix. Ctrl + Alt + F откроется на полный экран.
+
+Ну и там введи help (ну он не помещается) или смотри команды тута (сеть не работает)
+
+| Command | Action |
+| --- | --- |
+| `ls`, `pwd` | List entries / print current directory |
+| `mkdir name`, `cd name` | Create / enter a directory |
+| `rmdir name` | Remove an empty directory |
+| `touch name`, `cat name`, `rm name` | Create / read / remove a file |
+| `write name text` | Replace file contents, creating the file if needed |
+| `append name text` | Append text, creating the file if needed; no automatic newline |
+| `cp source destination` | Copy a file to a new name in the current directory |
+| `mv old new` | Rename a file or directory in the current directory |
+| `stat name` | Display type and byte count; `stat .` inspects the current directory |
+| `df` | Show free ext2 inodes, free blocks, and driver limits |
+| `diskinfo` | Show ATA/RAM backend, device sectors, and driver sector limit |
+| `devices` | List RAM, ATA, and USB mass-storage devices |
+| `mount device /mountpoint` | Mount an ext2 device; currently only `/` is supported |
+| `unmount` | Flush and unmount the current filesystem |
+| `sync` | Confirm that the filesystem remains mounted; operations are synchronous |
+| `./file.elf args` | Run a Barnix ELF32 application |
+| `help`, `clear`, `echo text`, `panic`, `init` | Help, screen, output, halt test, and reload `/etc/sys-lang.cfg` |
+| `macro file` | Full-screen UTF-8 text editor |
 
 
 Barnix has its own kernel with experimental Linux i386 ABI support. Linux
