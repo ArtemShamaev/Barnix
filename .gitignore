@@ -20,3 +20,4 @@ __pycache__/
 /userland/*.elf
 
 /kernel-test.elf
+qemu-w64-setup-20260729.exe
