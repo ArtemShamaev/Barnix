@@ -1,4 +1,6 @@
 # Barnix
+## Кароче:
+
 
 Barnix has its own kernel with experimental Linux i386 ABI support. Linux
 ELF programs now launch through `./filename`; ten basic `/bin` commands use
