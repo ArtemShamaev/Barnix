@@ -18,13 +18,13 @@ def main():
     parser.add_argument('programs', nargs='*', type=pathlib.Path,
                         help='ELF programs to copy into the image root')
     parser.add_argument('--size', type=int, default=2,
-                        help='filesystem size in MiB (default: 2; maximum supported by Barnix)')
+                        help='filesystem size in MiB (default: 2; maximum: 5120)')
     parser.add_argument('--force', action='store_true',
                         help='replace an existing image')
     args = parser.parse_args()
 
-    if args.size != 2:
-        parser.error('Barnix currently supports a 2 MiB USB filesystem')
+    if not 2 <= args.size <= 5120:
+        parser.error('Barnix supports ext2 volumes from 2 to 5120 MiB')
     output = args.output.resolve()
     if output.exists() and not args.force:
         parser.error(f'{output} already exists; use --force to reformat it')
@@ -43,7 +43,8 @@ def main():
         with image.open('wb') as stream:
             stream.truncate(args.size * 1024 * 1024)
         run(['mke2fs', '-q', '-t', 'ext2', '-F', '-b', '1024', '-I', '128',
-             '-N', '64', '-O', 'none,filetype', str(image)])
+             '-N', str(64 if args.size <= 8 else ((args.size + 7) // 8) * 128),
+             '-O', 'none,filetype,sparse_super', str(image)])
         from install_apps import install
         install(image, programs)
         image.replace(output)

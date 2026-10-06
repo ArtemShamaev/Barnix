@@ -1,5 +1,6 @@
 #ifndef BARNIX_LINUX_MEMORY_H
 #define BARNIX_LINUX_MEMORY_H
+int linux_memory_map_mmio(unsigned int base, unsigned int size);
 typedef struct { unsigned int base, heap_base, heap_break; } LinuxMemoryState;
 void linux_memory_capture(LinuxMemoryState *state);
 void linux_memory_resume(const LinuxMemoryState *state);

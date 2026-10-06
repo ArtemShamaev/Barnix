@@ -37,7 +37,7 @@ const char *elf_validate(const void *data, unsigned int size, ElfPlan *plan)
     if (!h.phnum || h.phnum > ELF_MAX_SEGMENTS || h.phentsize != sizeof(ProgramHeader) ||
         h.phoff > size || h.phnum > (size - h.phoff) / sizeof(ProgramHeader))
         return "invalid program header table";
-    if (h.ident[7] == 255 && h.ident[8] == BARNIX_APP_ABI) plan->legacy = 1;
+    if (h.ident[7] == 255 && (h.ident[8] == BARNIX_APP_ABI || h.ident[8] == 8 || h.ident[8] == 7)) plan->legacy = 1;
     else if ((h.ident[7] != 0 && h.ident[7] != 3) || h.ident[8])
         return "unsupported ELF OS/ABI or ABI version";
     uint32_t lowest = 0xffffffffU;

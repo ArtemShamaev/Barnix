@@ -1,8 +1,10 @@
 #include "lang.h"
 #include "barnix.h"
 #include "fs.h"
+#include "settings.h"
 
 static int language;
+void language_reset(void) { language=0; }
 int system_language(void) { return language; }
 static int space(char c) { return c == ' ' || c == '\t' || c == '\r'; }
 /* One setting: ru/en or LANG=ru/en. Blank lines and # comments are allowed.
@@ -39,10 +41,13 @@ int language_parse(const char *text, unsigned int size)
 int system_init(void)
 {
     char config[512];
-    int size = fs_size("/etc/sys-lang.cfg");
+    char path[96];
+    user_config_path("sys-lang.cfg", path);
+    int size = fs_size(path);
+    if (size < 0) { strcpy(path, "/etc/sys-lang.cfg"); size = fs_size(path); }
     if (size < 0 || size > (int)sizeof(config) ||
-        fs_read("/etc/sys-lang.cfg", 0, config, size) != size) {
-        println(RED, tr("cannot read /etc/sys-lang.cfg; language unchanged")); return -1;
+        fs_read(path, 0, config, size) != size) {
+        return -1;
     }
     int next = language_parse(config, size);
     if (next < 0) {

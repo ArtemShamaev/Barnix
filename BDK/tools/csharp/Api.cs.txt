@@ -1,0 +1,34 @@
+namespace Barnix {
+    public struct GraphicEvent { public int type, id, value; public uint key; }
+    public static class Graphics {
+        public const int None=0, Click=1, CloseEvent=2, Select=3;
+        public static void Init(string title,int x,int y,int width,int height) {}
+        public static int Button(int id,int x,int y,int width,string text) => 0;
+        public static int List(int id,int x,int y,int width,int height,string[] items,int count) => 0;
+        public static int Label(int id,int x,int y,int width,string text) => 0;
+        public static GraphicEvent Poll() => default;
+        public static void Draw() {}
+        public static void SetTitle(string title) {}
+        public static void Close() {}
+    }
+    public static class Console {
+        public static void Write(string text) {} public static void Write(int value) {}
+        public static void WriteLine(string text = "") {} public static void WriteLine(int value) {}
+        public static void Clear() {} public static void SetCursorPosition(int x, int y) {}
+        public static void WriteColor(int color, string text) {} public static uint ReadKey() => 0;
+    }
+    public static class Input { public static uint Poll() => 0; }
+    public struct MouseState { public int x, y, available; public uint buttons, sequence; }
+    public static class Mouse {
+        public enum Button : uint { Left = 1, Right = 2, Middle = 4 }
+        public const Button Left = Button.Left, Right = Button.Right, Middle = Button.Middle;
+        public static MouseState GetState() => default;
+        public static bool IsDown(MouseState state, Button button) => false;
+    }
+    public static class Thread { public static void Sleep(uint milliseconds) {} }
+    public static class Environment {
+        public static string UserName() => "";
+        public static int ArgumentCount() => 0;
+        public static string Argument(int index) => "";
+    }
+}

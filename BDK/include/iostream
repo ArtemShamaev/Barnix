@@ -1,0 +1,16 @@
+#ifndef BARNINO_BDK_IOSTREAM
+#define BARNINO_BDK_IOSTREAM
+#include <barnix_api>
+/* Small freestanding output stream, not the host C++ standard library. */
+namespace std {
+class ostream {
+public:
+    ostream &operator<<(const char *value) { Barnix::Console::Write(value); return *this; }
+    ostream &operator<<(char value) { Barnix::Console::Write(value); return *this; }
+    ostream &operator<<(int value) { Barnix::Console::Write(value); return *this; }
+    ostream &operator<<(ostream &(*function)(ostream &)) { return function(*this); }
+};
+inline ostream cout;
+inline ostream &endl(ostream &stream) { return stream << '\n'; }
+}
+#endif

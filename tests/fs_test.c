@@ -6,43 +6,75 @@ extern void abort(void);
 extern int puts(const char *);
 #define CHECK(expr) do { if (!(expr)) { puts("FAILED: " #expr); abort(); } } while (0)
 
-static unsigned char test_disk[4096][DISK_SECTOR_SIZE];
+static DiskSelection mock_selection = {DISK_RAM, 0, 4096, 0};
+static unsigned char test_disks[3][4096][DISK_SECTOR_SIZE];
+#define test_disk test_disks[mock_selection.id == DISK_RAM ? 0 : mock_selection.id - 3]
 static char output[4096];
 static int fail_writes;
 static int write_calls;
 static int fail_after = -1;
 
+#ifdef FS_FILE_BACKED
+static void *disk_stream;
+extern int fseeko(void *, long, int);
+extern size_t fread(void *, size_t, size_t, void *);
+extern size_t fwrite(const void *, size_t, size_t, void *);
+extern int fflush(void *);
+#endif
 int disk_read(unsigned int lba, void *buffer)
 {
+#ifdef FS_FILE_BACKED
+    if (lba >= mock_selection.sectors || fseeko(disk_stream, ((long)lba + mock_selection.offset) * 512, 0)) return -1;
+    return fread(buffer, 1, 512, disk_stream) == 512 ? 0 : -1;
+#else
     if (lba >= 4096) return -1;
     memcpy(buffer, test_disk[lba], DISK_SECTOR_SIZE);
     return 0;
+#endif
 }
 int disk_write(unsigned int lba, const void *buffer)
 {
     write_calls++;
+#ifdef FS_FILE_BACKED
+    if (lba >= mock_selection.sectors || fail_writes || fail_after == 0 ||
+        fseeko(disk_stream, ((long)lba + mock_selection.offset) * 512, 0)) return -1;
+    if (fail_after > 0) fail_after--;
+    return fwrite(buffer, 1, 512, disk_stream) == 512 ? 0 : -1;
+#else
     if (lba >= 4096 || fail_writes || fail_after == 0) return -1;
     if (fail_after > 0) fail_after--;
     memcpy(test_disk[lba], buffer, DISK_SECTOR_SIZE);
     return 0;
+#endif
 }
-static DiskSelection mock_selection = {DISK_RAM, 0, 4096, 0};
 int disk_read_many(unsigned int lba, void *buffer, unsigned int count)
 {
     for (unsigned int i = 0; i < count; i++)
         if (disk_read(lba + i, (unsigned char *)buffer + i * 512)) return -1;
     return 0;
 }
+void disk_info(void) {}
+int disk_device_count(void) { return 3; }
+const char *disk_device_name(int i) { return (const char *[]) {"ram0", "disk2", "disk3"}[i]; }
+const char *disk_type(void) { return mock_selection.id == DISK_RAM ? "ram" : "disk"; }
+uint64_t disk_capacity(void) { return mock_selection.sectors; }
 int disk_present(void) { return mock_selection.id != DISK_NONE; }
-int disk_flush(void) { return fail_writes ? -1 : 0; }
+int disk_flush(void) {
+#ifdef FS_FILE_BACKED
+    if (fflush(disk_stream)) return -1;
+#endif
+    return fail_writes ? -1 : 0;
+}
 DiskSelection disk_selection(void) { return mock_selection; }
 void disk_restore(DiskSelection selection) { mock_selection = selection; }
 void disk_deselect(void) { mock_selection.id = DISK_NONE; }
 int disk_select(const char *name)
 {
-    if (strcmp(name, "ram0")) return -1;
-    mock_selection = (DiskSelection){DISK_RAM, 0, 4096, 0}; return 0;
+    int id = !strcmp(name, "ram0") ? DISK_RAM : !strcmp(name, "disk2") ? 4 : !strcmp(name, "disk3") ? 5 : 0;
+    if (!id) return -1;
+    mock_selection = (DiskSelection){id, 0, 4096, 0}; return 0;
 }
+int disk_select_raw(const char *name) { return disk_select(name); }
 const char *disk_name(void) { return "ram0"; }
 int strlen(const char *s) { int n = 0; while (s[n]) n++; return n; }
 int strcmp(const char *a, const char *b)

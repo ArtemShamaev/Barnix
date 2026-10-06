@@ -10,6 +10,12 @@ _start:
     cld
     mov %eax, %edi
     mov %ebx, %esi
+#ifdef BARNIX_EFI
+    /* EFI GRUB may leave PAE enabled with paging off. Barnix's process page
+     * tables are non-PAE, so normalize CPU state before enabling them. */
+    xor %eax, %eax
+    mov %eax, %cr4
+#endif
     lgdt gdt_descriptor
     ljmp $GDT_CODE_SEGMENT, $gdt_loaded
 
@@ -54,7 +60,7 @@ gdt_descriptor:
 .section .bss
 .align 16
 kernel_stack_bottom:
-.skip 16384
+.skip 131072
 .global kernel_stack_top
 kernel_stack_top:
 

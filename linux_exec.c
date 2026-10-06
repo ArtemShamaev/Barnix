@@ -7,6 +7,7 @@
 #include "elf_format.h"
 #include "barnix.h"
 #include "fs.h"
+#include "permissions.h"
 
 /* Staging is kernel-owned: exec must finish reading every user pointer before
  * replacing the address space. Cooperative tasks share this staging area. */
@@ -72,9 +73,10 @@ static unsigned int install_image(const void *image)
         memcpy((void *)sp, (const unsigned char *)image + plan->phoff, plan->phnum * 32);
         phdr = sp + delta;
     }
+    unsigned int uid=permissions_uid();
     unsigned int auxv[] = {
         3, phdr, 4, 32, 5, plan->phnum, 6, 4096, 7, 0, 8, 0,
-        9, plan->entry, 11, 0, 12, 0, 13, 0, 14, 0, 23, 0, 31, execfn, 0, 0
+        9, plan->entry, 11, uid, 12, uid, 13, uid, 14, uid, 23, 0, 31, execfn, 0, 0
     };
     unsigned int words = 1 + staged.argc + 1 + staged.envc + 1 + sizeof(auxv) / sizeof(auxv[0]);
     sp = (sp - words * 4) & ~15U;
@@ -131,11 +133,7 @@ int linux_run_image(const void *image, unsigned int size, int argc,
 
 static int read_image(const char *path)
 {
-    int size = fs_size(path);
-    if (size < 0) return -2;
-    if (size > (int)sizeof(image_buffer)) return -27;
-    if (fs_read(path, 0, image_buffer, size) != size) return -5;
-    return size;
+    return fs_load_executable(path, image_buffer, sizeof(image_buffer));
 }
 int linux_run(const char *path, int argc, const char *const *argv, int *status)
 {

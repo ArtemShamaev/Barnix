@@ -6,7 +6,8 @@
 #define VGA_ADDRESS 0xB8000
 #define VGA_WIDTH 80
 #define VGA_HEIGHT 25
-#define MAKE_ATTR(color) ((color) & 0x0F)
+int console_attribute(int color);
+#define MAKE_ATTR(color) console_attribute(color)
 
 enum {
     BLACK, BLUE, GREEN, CYAN, RED, MAGENTA, BROWN, LIGHT_GREY,
@@ -26,6 +27,7 @@ void strcat(char *dest, const char *src);
 char* strchr(const char *s, int c);
 char* strstr(const char *haystack, const char *needle);
 void input(char *buffer, int max_length, const char *prompt);
+void input_history_clear(void);
 int strncmp(const char *a, const char *b, int n);
 void strncpy(char *dst, const char *src, int n);
 int strnlen(const char *str, int n);

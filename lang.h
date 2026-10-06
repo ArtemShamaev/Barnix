@@ -3,5 +3,6 @@
 const char *tr(const char *english);
 int system_init(void);
 int system_language(void);
+void language_reset(void);
 int language_parse(const char *text, unsigned int size);
 #endif

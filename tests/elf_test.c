@@ -56,6 +56,8 @@ int main(int argc, char **argv)
     RESET(); h->ident[7] = 9; REJECT();
     RESET(); h->ident[8] = 99; REJECT();
     RESET(); CHECK(elf_validate(modified, size, &plan) == NULL && plan.legacy);
+    RESET(); h->ident[8]=7; CHECK(elf_validate(modified,size,&plan)==NULL && plan.legacy);
+    RESET(); h->ident[8]=8; CHECK(elf_validate(modified,size,&plan)==NULL && plan.legacy);
     for (int i = 1; i < argc; i++) {
         f = fopen(argv[i], "rb"); CHECK(f);
         size = fread(original, 1, sizeof(original), f); fclose(f);

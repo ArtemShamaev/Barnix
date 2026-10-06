@@ -5,6 +5,7 @@
 #include "keyboard.h"
 #include "lang.h"
 
+void user_config_path(const char *file,char *out) { (void)file;strcpy(out,"/etc/sys-lang.cfg"); }
 static const char *config = "LANG=en\n";
 static int missing;
 int fs_size(const char *name) { assert(!strcmp(name, "/etc/sys-lang.cfg")); return missing ? -1 : (int)strlen(config); }
@@ -64,6 +65,8 @@ int main(void)
     config = "broken"; assert(system_init() == -1 && system_language() == 1);
     missing = 1; assert(system_init() == -1 && system_language() == 1);
     missing = 0; config = "en"; assert(system_init() == 0 && system_language() == 0);
+    config="ru";assert(system_init()==0 && system_language()==1);
+    language_reset();assert(system_language()==0);
     puts("Keyboard, UTF-8 and configuration tests passed");
     return 0;
 }

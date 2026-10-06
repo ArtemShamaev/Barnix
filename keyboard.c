@@ -1,4 +1,8 @@
 #include "keyboard.h"
+#include "mouse.h"
+/* Host input tests do not link the hardware USB driver. */
+extern int usb_mouse_poll(void) __attribute__((weak));
+extern int usb_xhci_poll(void) __attribute__((weak));
 
 static unsigned int shifts, alts;
 static int caps, caps_down, extended, chord, russian, control;
@@ -221,15 +225,47 @@ unsigned int keyboard_feed(unsigned char scan)
     if (!shifts && !alts) chord = 0;
     return 0;
 }
-unsigned int getch(void)
+unsigned int keyboard_event(void)
 {
     for (;;) {
+        if(usb_xhci_poll && usb_xhci_poll())return KEY_MOUSE;
+        if(usb_mouse_poll && usb_mouse_poll())return KEY_MOUSE;
         unsigned char status = inb(0x64);
         if (status & 1) {
             unsigned char scan = inb(0x60);
-            if (status & 0x20) continue; /* Ignore PS/2 mouse bytes. */
+            if (status & 0x20) { if(mouse_feed(scan))return KEY_MOUSE;continue; }
             unsigned int c = keyboard_feed(scan);
             if (c) return c;
         }
     }
 }
+unsigned int keyboard_poll(void) {
+    if(usb_xhci_poll && usb_xhci_poll())return KEY_MOUSE;
+        if(usb_mouse_poll && usb_mouse_poll())return KEY_MOUSE;
+    for(int i=0;i<32;i++) {
+        unsigned char status=inb(0x64);
+        if(!(status&1))return 0;
+        unsigned char scan=inb(0x60);
+        if(status&0x20) { if(mouse_feed(scan))return KEY_MOUSE; }
+        else { unsigned int key=keyboard_feed(scan);if(key)return key; }
+    }
+    return 0;
+}
+static void timer_out(unsigned short port,unsigned char value) {
+    __asm__ volatile("outb %0,%1"::"a"(value),"Nd"(port));
+}
+void keyboard_sleep(unsigned int milliseconds) {
+    if(milliseconds>1000)milliseconds=1000;
+    while(milliseconds) {
+        unsigned int part=milliseconds>20?20:milliseconds;milliseconds-=part;
+        unsigned int count=1193*part;
+        unsigned char original=inb(0x61);
+        timer_out(0x61,original&~3U);timer_out(0x43,0xb0);
+        timer_out(0x42,count&255);timer_out(0x42,count>>8);
+        timer_out(0x61,(original&~2U)|1U);
+        while(!(inb(0x61)&0x20)) {}
+        timer_out(0x61,original);
+    }
+}
+
+unsigned int getch(void) { unsigned int key;do{key=keyboard_event();}while(key==KEY_MOUSE);return key; }

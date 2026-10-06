@@ -1,0 +1,44 @@
+#ifndef BARNINO_BDK_CPP_API
+#define BARNINO_BDK_CPP_API
+#include <barnix_api.h>
+namespace Barnix {
+struct Console {
+    static void Write(const char *text) { barnix_console_write(text); }
+    static void Write(int value) { barnix_console_write_int(value); }
+    static void Write(char value) { char text[2] = {value, 0}; Write(text); }
+    static void WriteLine(const char *text = "") { barnix_console_write_line(text); }
+    static void WriteLine(int value) { Write(value); WriteLine(); }
+    static void Clear() { barnix_console_clear(); }
+    static void SetCursorPosition(int x, int y) { barnix_console_position(x, y); }
+    static void WriteColor(int color, const char *text) { barnix_console_color(color, text); }
+    static unsigned int ReadKey() { return barnix_console_read_key(); }
+    static int ReadLine(char *buffer, unsigned int capacity) { return barnix_console_read_line(buffer, capacity); }
+    template<size_t N> static int ReadLine(char (&buffer)[N]) { return ReadLine(buffer, N); }
+};
+struct Input { static unsigned int Poll() { return barnix_input_poll(); } };
+using MouseState = BarnixMouse;
+struct Mouse {
+    enum Button : unsigned int { Left = BARNIX_MOUSE_LEFT, Right = BARNIX_MOUSE_RIGHT, Middle = BARNIX_MOUSE_MIDDLE };
+    static BarnixPointer GetPointer() { return barnix_pointer_get_state(); }
+    static MouseState GetState() { return barnix_mouse_get_state(); }
+    static bool IsDown(const MouseState &state, Button button) { return barnix_mouse_is_down(state, button); }
+};
+struct Thread { static void Sleep(unsigned int milliseconds) { barnix_sleep(milliseconds); } };
+struct File {
+    static int Size(const char *path) { return barnix_file_size(path); }
+    static int Read(const char *path, void *data, unsigned int size, unsigned int offset = 0) {
+        return barnix_file_read(path, offset, data, size);
+    }
+    static int Write(const char *path, const void *data, int size) { return barnix_file_write(path, data, size); }
+    static int Append(const char *path, const void *data, int size) { return barnix_file_append(path, data, size); }
+};
+struct Environment {
+    static const char *UserName() { return barnix_current_user(); }
+    static int ArgumentCount() { return barnix_program_argc; }
+    static const char *Argument(int index) {
+        return index >= 0 && index < barnix_program_argc ? barnix_program_argv[index] : nullptr;
+    }
+};
+struct Screen { static void Show(const unsigned short *cells) { barnix_screen_show(cells); } };
+}
+#endif

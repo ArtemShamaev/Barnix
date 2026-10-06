@@ -10,7 +10,7 @@ from qemu_shell import run
 
 
 # Program counts change as userland migrates; account for the actual template.
-base_free_inodes = int.from_bytes(pathlib.Path("live-ext2.img").read_bytes()[1040:1044], "little")
+base_free_inodes = int.from_bytes(pathlib.Path("live-ext2.img").read_bytes()[1040:1044], "little") - 8
 
 with tempfile.TemporaryDirectory(prefix='barnix-shell-') as temporary:
     directory = pathlib.Path(temporary)
@@ -33,14 +33,14 @@ with tempfile.TemporaryDirectory(prefix='barnix-shell-') as temporary:
         ('pwd', '/docs'),
         ('cd ..', 'bssh>'),
         ('rmdir docs', 'bssh>'),
-        ('df', f'Free inodes: {base_free_inodes - 2} / 64'),
+        ('df', f'Free inodes: {base_free_inodes - 2} / 256'),
         ('diskinfo', 'Device sectors (512 bytes): 4096'),
         ('sync', 'filesystem saved'),
         ('unmount', 'filesystem unmounted'),
         ('mount', 'no filesystem mounted'),
         ('mount ram0 /', 'mounted ram0 on /'),
     ])
-    run(disk, directory, [('cat c', 'helloworld'), ('df', f'Free inodes: {base_free_inodes - 2} / 64')])
+    run(disk, directory, [('cat c', 'helloworld'), ('df', f'Free inodes: {base_free_inodes - 2} / 256')])
     subprocess.run(['e2fsck', '-fn', str(disk)], check=True)
     result = subprocess.run(['debugfs', '-R', 'cat /c', str(disk)], capture_output=True, text=True, check=True)
     assert result.stdout == 'helloworld'
@@ -56,7 +56,7 @@ with tempfile.TemporaryDirectory(prefix='barnix-shell-') as temporary:
         ('sync', 'filesystem saved'),
     ])
     run(None, directory, [('stat optical', 'operation failed'),
-                          ('df', f'Free inodes: {base_free_inodes} / 64')])
+                          ('df', f'Free inodes: {base_free_inodes} / 256')])
     before = disk.read_bytes()
     run(disk, directory, [('diskinfo', 'Device: RAM disk (volatile)'),
                           ('write live temporary', 'bssh>'),
@@ -72,7 +72,7 @@ with tempfile.TemporaryDirectory(prefix='barnix-shell-') as temporary:
 with tempfile.TemporaryDirectory(prefix='barnix-exec-') as temporary:
     run(None, pathlib.Path(temporary), [
         ('write bad notelf', 'program exited: 0'),
-        ('./bad', 'ELF: truncated ELF header'),
+        ('./bad', 'command not found'),
         ('cd bin', 'program exited: 0'),
         ('rm echo', 'program exited: 0'),
         ('echo absent', 'command not found'),

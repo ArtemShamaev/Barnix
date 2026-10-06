@@ -3,11 +3,14 @@ import subprocess
 import time
 
 
-def run(disk, directory, commands, live_only=False, command_timeout=10):
-    args = ['qemu-system-i386', '-m', '256M', '-boot', 'd', '-cdrom', 'barnix.iso',
+def run(disk, directory, commands, live_only=False, command_timeout=10, extra_disks=(), extra_args=()):
+    args = ['qemu-system-i386', '-m', '256M', '-boot', 'd', '-drive', 'file=barnix.iso,media=cdrom,if=ide,index=3',
             '-display', 'none', '-serial', 'none', '-monitor', 'stdio', '-no-reboot']
     if disk is not None:
         args += ['-drive', f'file={disk},format=raw,if=ide']
+    for index, extra in enumerate(extra_disks, 1):
+        args += ['-drive', f'file={extra},format=raw,if=ide,index={index}']
+    args += list(extra_args)
     process = subprocess.Popen(
         args,
         stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -32,7 +35,19 @@ def run(disk, directory, commands, live_only=False, command_timeout=10):
         monitor('sendkey ret')
         time.sleep(3)
         text = screen()
+        def send(text):
+            for character in text:
+                monitor('sendkey '+{' ':'spc','/':'slash','-':'minus'}.get(character,character)+' 1')
+                time.sleep(.025)
+            monitor('sendkey ret 1');time.sleep(.4)
+        if 'First start:' in text:
+            for answer in ('rootpw','rootpw','tester','testerpw','testerpw'):
+                send(answer)
+            text=screen()
+        if 'Login:' in text and 'bssh>' not in text:
+            send('root');send('rootpw');text=screen()
         assert 'bssh>' in text, ('Shell did not start', text)
+        send('cd /');send('clear')
         for command, expected in commands:
             for character in command:
                 key = {' ': 'spc', '.': 'dot', '/': 'slash', '-': 'minus',

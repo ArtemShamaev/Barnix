@@ -37,7 +37,7 @@ static int run_command(const ShellCommand *command)
     /* Linux itself may accept standalone-tagged ELF. Never enter a Barnix
      * function-pointer program from this Linux-only runner, including on Linux. */
     int fd = CALL(open, path, 0, 0);
-    int lookup_error = fd < 0 ? fd : 0;
+    int lookup_error = fd < 0 && fd != -13 ? fd : 0;
     unsigned char ident[16];
     int got = 0;
     if (fd >= 0) {

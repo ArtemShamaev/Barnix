@@ -120,8 +120,8 @@ static unsigned char latin_row(unsigned int code, unsigned int row)
     case ';': return row == 2 ? 12 : row == 5 ? 8 : row == 6 ? 4 : 0;
     case '-': return row == 3 ? 28 : 0;
     case '_': return row == 6 ? 28 : 0;
-    case '/': return (row == 0 || row == 6) ? 24 : 4 << (6 - row);
-    case '\\': return (row == 0 || row == 6) ? 3 : 3 << row;
+    case '/': { static const unsigned char r[7] = {4, 8, 8, 16, 32, 32, 64}; return r[row]; }
+    case '\\': { static const unsigned char r[7] = {64, 32, 32, 16, 8, 8, 4}; return r[row]; }
     case '(': return row < 2 ? 4 : row < 5 ? 8 : 4;
     case ')': return row < 2 ? 8 : row < 5 ? 4 : 8;
     case '[': return 28 | (row == 0 || row == 6 ? 3 : 0);
@@ -144,6 +144,16 @@ static unsigned char latin_row(unsigned int code, unsigned int row)
     case '"': return row == 0 ? 20 : 0;
     case '\'': return row == 0 ? 4 : 0;
     }
+    return 0;
+}
+unsigned char console_glyph_row(unsigned int code, unsigned int y)
+{
+    if(code==0xdf)return y<8?255:0;
+    if (y < 1 || y > 14) return 0;
+    unsigned int row = (y - 1) / 2;
+    if (code >= 32 && code < 127) return latin_row(code, row);
+    for (unsigned int i = 0; i < sizeof(glyphs) / sizeof(glyphs[0]); i++)
+        if (text_glyph(glyphs[i].code) == code) return glyphs[i].rows[row] << 2;
     return 0;
 }
 static void outb(unsigned short port, unsigned char value)
@@ -187,7 +197,11 @@ void console_font_init(void)
             font[base + 2 + y * 2] = row;
         }
     }
+    for(int y=0;y<32;y++)font[0xdf*32+y]=y<8?255:0;
     for (int i = 0; i < 9; i++) write_reg(0x3ce, i, gfx[i]);
     for (int i = 2; i < 5; i++) write_reg(0x3c4, i, seq[i]);
     write_reg(0x3c4, 1, seq[1]);
+    /* Select sixteen background colors instead of hardware text blinking. */
+    inb(0x3da);outb(0x3c0,0x10);unsigned char mode=inb(0x3c1);
+    inb(0x3da);outb(0x3c0,0x10);outb(0x3c0,mode&~8);outb(0x3c0,0x20);
 }

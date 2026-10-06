@@ -1,0 +1,78 @@
+{
+  "distribution": "Barnix",
+  "profiles": [
+    {
+      "id": "minimal",
+      "title": "Minimal",
+      "description": "Shell, Execute desktop, files, disks and system configuration",
+      "commands": [
+        "echo",
+        "pwd",
+        "cat",
+        "ls",
+        "touch",
+        "write",
+        "append",
+        "cp",
+        "true",
+        "false",
+        "df",
+        "diskinfo",
+        "devices",
+        "clear",
+        "rm",
+        "mkdir",
+        "cd",
+        "rmdir",
+        "stat",
+        "mv",
+        "sync",
+        "mount",
+        "format",
+        "unmount",
+        "help",
+        "init",
+        "su",
+        "sudo",
+        "chmod",
+        "whoami",
+        "useradd",
+        "fdisk",
+        "theme",
+        "execute",
+        "bcc"
+      ]
+    },
+    {
+      "id": "standard",
+      "title": "Standard",
+      "description": "Minimal + network tools, download and macros",
+      "extends": "minimal",
+      "commands": [
+        "bnm",
+        "get",
+        "git",
+        "macro",
+        "panic"
+      ]
+    },
+    {
+      "id": "complete",
+      "title": "Complete",
+      "description": "Standard + example ELF applications and games",
+      "extends": "standard",
+      "commands": [
+        "snake",
+        "pong",
+        "paint"
+      ],
+      "examples": [
+        "hello.elf",
+        "fileio.elf",
+        "theme.elf",
+        "snake.elf",
+        "pong.elf"
+      ]
+    }
+  ]
+}

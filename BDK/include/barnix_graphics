@@ -1,0 +1,34 @@
+#ifndef BARNIX_GRAPHICS_CPP
+#define BARNIX_GRAPHICS_CPP
+#include <barnix_graphics.h>
+namespace Barnix {
+using GraphicEvent = BglEvent;
+class GraphicApplication {
+    BglApp app;
+public:
+    GraphicApplication(const char *title,int x=64,int y=48,int width=512,int height=304) {
+        bgl_init(&app,title,x,y,width,height);
+    }
+    int Button(int id,int x,int y,int width,const char *text) { return bgl_button(&app,id,x,y,width,text); }
+    int List(int id,int x,int y,int width,int height,const char *const *items,int count) { return bgl_list(&app,id,x,y,width,height,items,count); }
+    int Label(int id,int x,int y,int width,const char *text) { return bgl_label(&app,id,x,y,width,text); }
+    GraphicEvent Poll() { return bgl_poll(&app); }
+    void Draw() { bgl_draw(&app); }
+    void SetTitle(const char *title) { app.title = title ? title : ""; }
+    void Close() { bgl_close(&app); }
+};
+// One static canvas: suitable for the native C# subset without heap allocation.
+struct Graphics {
+    enum { None=BGL_EVENT_NONE, Click=BGL_EVENT_CLICK, CloseEvent=BGL_EVENT_CLOSE, Select=BGL_EVENT_SELECT };
+    static BglApp &Canvas() { static BglApp app; return app; }
+    static void Init(const char *title,int x,int y,int width,int height) { bgl_init(&Canvas(),title,x,y,width,height); }
+    static int Button(int id,int x,int y,int width,const char *text) { return bgl_button(&Canvas(),id,x,y,width,text); }
+    static int List(int id,int x,int y,int width,int height,const char *const *items,int count) { return bgl_list(&Canvas(),id,x,y,width,height,items,count); }
+    static int Label(int id,int x,int y,int width,const char *text) { return bgl_label(&Canvas(),id,x,y,width,text); }
+    static GraphicEvent Poll() { return bgl_poll(&Canvas()); }
+    static void Draw() { bgl_draw(&Canvas()); }
+    static void SetTitle(const char *title) { Canvas().title=title?title:""; }
+    static void Close() { bgl_close(&Canvas()); }
+};
+}
+#endif

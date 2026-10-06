@@ -1,6 +1,7 @@
 #include "barnix.h"
 #include "keyboard.h"
 #include "text.h"
+#include "console_video.h"
 /* =========================================================
    Barnix I/O Library Implementation
    Copyright (C) Barnino Systems, all rights reserved.
@@ -8,20 +9,36 @@
 
 
 /* Указатель на видеопамять */
-static unsigned short *vga_buffer = (unsigned short *)VGA_ADDRESS;
+#define vga_buffer console_cells
 
 /* Текущая позиция курсора */
 static int cursor_x = 0;
 static int cursor_y = 0;
 static char input_history[16][128];
 static unsigned int input_history_count;
+void input_history_clear(void) { memset(input_history,0,sizeof(input_history));input_history_count=0; }
+
+static int theme_background, theme_foreground = WHITE;
+int console_attribute(int color) {
+    return (theme_background << 4) | (color == WHITE ? theme_foreground : color & 15);
+}
+void console_theme(int background, int foreground) {
+    theme_background = background & 7; theme_foreground = foreground & 15;
+    for (int i=0;i<2000;i++) {
+        unsigned int ch=console_cells[i]&255;
+        console_cells[i]=(console_attribute(WHITE)<<8)|ch;
+    }
+    console_present();
+}
 
 /* ==================== ВНУТРЕННИЕ ФУНКЦИИ ==================== */
 
 /* Установка курсора */
 void set_cursor(int x, int y) {
+    console_cursor_visible(1);
     cursor_x = x;
     cursor_y = y;
+    if (console_graphics()) { console_video_cursor(x, y); return; }
     unsigned short pos = y * VGA_WIDTH + x;
     
     __asm__ volatile (
@@ -215,8 +232,9 @@ void input(char *buffer, int max_length, const char *prompt) {
                 static const char *commands[] = {
                     "ls","pwd","df","diskinfo","devices","clear","touch","rm",
                     "mkdir","cd","rmdir","stat","cp","mv","write","append","cat",
-                    "echo","panic","sync","mount","unmount","help","init","macro",
-                    "bnm","get","git","true","false","linux"
+                    "echo","panic","sync","mount","format","unmount","help","init","macro",
+                    "bnm","get","git","true","false","linux",
+                    "su","sudo","chmod","useradd","whoami","theme","snake","pong","paint","fdisk"
                 };
                 int match = -1, matches = 0;
                 for (unsigned int i = 0; i < sizeof(commands) / sizeof(commands[0]); i++)
@@ -234,7 +252,7 @@ void input(char *buffer, int max_length, const char *prompt) {
         if (ch == '\n') {
             buffer[pos] = '\0';
             putchar('\n', WHITE);
-            if (pos && (!input_history_count || strcmp(input_history[input_history_count - 1], buffer))) {
+            if (pos && !strstr(buffer,"passwd=") && (!input_history_count || strcmp(input_history[input_history_count - 1], buffer))) {
                 if (input_history_count == 16) {
                     for (int i = 1; i < 16; i++) strcpy(input_history[i - 1], input_history[i]);
                     input_history_count--;

@@ -23,7 +23,17 @@ class Guest:
             stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         time.sleep(3)
         self.key('ret')
-        self.expect('bssh>', 15)
+        deadline=time.monotonic()+15
+        while time.monotonic()<deadline:
+            text=self.screen()
+            if 'New root password:' in text or 'Login:' in text:break
+            time.sleep(.2)
+        if 'New root password:' in text:
+            for prompt,value in [('New root password:','rootpw'),('Repeat root password:','rootpw'),('New username:','alice'),('New user password:','alicepw'),('Repeat user password:','alicepw')]:
+                self.expect(prompt);self.type(value);self.key('ret')
+        self.expect('Login:');self.type('root');self.key('ret');self.expect('Password:')
+        self.type('rootpw');self.key('ret');self.expect('bssh>',15)
+        self.type('cd /');self.key('ret');time.sleep(.3)
 
     def monitor(self, command):
         self.process.stdin.write((command + '\n').encode())
@@ -90,16 +100,16 @@ with tempfile.TemporaryDirectory(prefix='barnix-lang-') as temporary:
         guest.command('cd /каталог', 'program exited: 0')
         guest.command('write текст Привет Ёж', 'program exited: 0')
         guest.command('cat текст', '\nПривет Ёж\n')
-        guest.command('write /etc/sys-lang.cfg LANG=ru', 'program exited: 0')
+        guest.command('write /home/root/useretc/sys-lang.cfg LANG=ru', 'program exited: 0')
         guest.command('init', 'Настройки применены')
         guest.command('pwd', '\n/каталог\n')
         guest.command('stat текст', 'Байт: 17')
         guest.command('cat текст', '\nПривет Ёж\n')
         guest.command('echo configuration applied', '\nconfiguration applied\n')
-        guest.command('write /etc/sys-lang.cfg LANG=xx', 'Программа завершена: 0')
+        guest.command('write /home/root/useretc/sys-lang.cfg LANG=xx', 'Программа завершена: 0')
         guest.command('init', 'ожидается LANG=en или LANG=ru')
         guest.command('stat текст', 'Байт: 17')
-        guest.command('write /etc/sys-lang.cfg LANG=ru', 'Программа завершена: 0')
+        guest.command('write /home/root/useretc/sys-lang.cfg LANG=ru', 'Программа завершена: 0')
         guest.command('clear', 'Программа завершена: 0')
         guest.type('echo АБ'); guest.key('backspace'); guest.type('В'); guest.key('ret')
         guest.expect('\nАВ\n')
@@ -125,9 +135,9 @@ with tempfile.TemporaryDirectory(prefix='barnix-lang-') as temporary:
     assert exported.read_bytes() == 'Привет Ёж'.encode('utf-8')
     guest = Guest(directory, disk)
     try:
-        guest.expect('Файловая система готова')
+        guest.command('init', 'Настройки применены')
         guest.command('stat каталог', 'Тип: каталог')
-        guest.command('write /etc/sys-lang.cfg LANG=en', 'Программа завершена: 0')
+        guest.command('write /home/root/useretc/sys-lang.cfg LANG=en', 'Программа завершена: 0')
         guest.command('init', 'configuration applied')
         guest.command('stat каталог', 'Type: directory')
         guest.command('cat /каталог/текст', '\nПривет Ёж\n')

@@ -11,7 +11,7 @@ with tempfile.TemporaryDirectory(prefix='barnix-image-', dir=output.parent) as t
     with image.open('wb') as stream:
         stream.truncate(2 * 1024 * 1024)
     subprocess.run(['mke2fs', '-q', '-t', 'ext2', '-F', '-b', '1024', '-I', '128',
-                    '-N', '64', '-O', 'none,filetype', str(image)], check=True)
+                    '-N', '256', '-O', 'none,filetype', str(image)], check=True)
     from install_apps import install
     install(image, applications)
     image.replace(output)

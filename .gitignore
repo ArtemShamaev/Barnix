@@ -21,3 +21,26 @@ __pycache__/
 
 /kernel-test.elf
 qemu-w64-setup-20260729.exe
+
+/disks/
+/tests/vfs_test
+
+/Setup/build/
+/Setup/kernel.elf
+/Setup/barnix-setup.iso
+/Setup/target.img
+
+/tests/large_fs_test
+
+/barnix-legacy-setup.iso
+/barnix-efi-setup.iso
+/kernel-efi.elf
+/Setup/kernel-efi.elf
+
+/Setup/target-efi.img
+/Setup/OVMF_VARS.fd
+
+/tests/permissions_test
+
+/BDK/dist/
+/BDK/**/__pycache__/

@@ -4,6 +4,7 @@
 #include "linux_user.h"
 #include "linux_memory.h"
 #include "fs.h"
+#include "permissions.h"
 #include "barnix.h"
 #include "keyboard.h"
 
@@ -40,7 +41,7 @@ static unsigned int task_flags[LINUX_TASK_LIMIT][FD_COUNT];
 static unsigned int file_task;
 #define files task_files[file_task]
 #define descriptor_flags task_flags[file_task]
-static unsigned char write_buffer[FS_MAX_FILE_SIZE];
+
 
 void linux_syscall_reset(void)
 {
@@ -242,17 +243,9 @@ static int transfer(unsigned int fd, unsigned int address, unsigned int count, i
         file->position += got;
         return got;
     }
-    int size = fs_size(file->name);
-    if (size < 0) return -EIO;
-    unsigned int position = file->flags & O_APPEND ? (unsigned int)size : file->position;
-    if (position > sizeof(write_buffer) || count > sizeof(write_buffer) - position) return -EFBIG;
-    unsigned int end = position + count;
-    unsigned int new_size = end > (unsigned int)size ? end : (unsigned int)size;
-    memset(write_buffer, 0, new_size);
-    if (fs_read(file->name, 0, write_buffer, size) != size) return -EIO;
-    memcpy(write_buffer + position, data, count);
-    if (fs_write(file->name, (const char *)write_buffer, new_size)) return -EIO;
-    file->position = end;
+    int end=fs_pwrite(file->name,file->position,data,count,file->flags & O_APPEND);
+    if(end<0)return end;
+    file->position=end;
     return count;
 }
 int linux_syscall_dispatch(LinuxSyscallFrame *frame)
@@ -274,7 +267,7 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
     case LINUX_SYS_getegid: /* getegid */
     case LINUX_SYS_getuid32: case LINUX_SYS_getgid32:
     case LINUX_SYS_geteuid32: case LINUX_SYS_getegid32: /* 32-bit IDs */
-        return 0;
+        return permissions_uid();
     case LINUX_SYS_read: return transfer(a, b, c, 0);
     case LINUX_SYS_write: return transfer(a, b, c, 1);
     case __NR_pipe: return create_pipe(a, 0);
@@ -301,9 +294,11 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
         OpenFile *file = 0;
         for (int i = 0; i < FD_COUNT * LINUX_TASK_LIMIT; i++) if (!descriptions[i].refs) { file = &descriptions[i]; break; }
         if (!file) return -EMFILE;
+        if (((b & O_ACCMODE) != 1 && !check_permission(path,'r')) ||
+            ((b & O_ACCMODE) != 0 && !check_permission(path,'w'))) return -13;
         int directory = fs_is_dir(path);
         if (directory && ((b & O_ACCMODE) || (b & (O_CREAT | O_TRUNC)))) return -EISDIR;
-        int size = directory ? 0 : fs_size(path);
+        int size = directory ? 0 : fs_file_size(path);
         if ((b & O_DIRECTORY) && !directory) return size < 0 ? -ENOENT : -20;
         if (size >= 0 && (b & O_CREAT) && (b & O_EXCL)) return -17;
         if (size < 0) {
@@ -356,7 +351,7 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
         if (!file) return -LINUX_EBADF;
         if (file->terminal || file->pipe) return -ESPIPE;
         if (c > 2) return -LINUX_EINVAL;
-        int size = fs_size(file->name);
+        int size = fs_file_size(file->name);
         if (size < 0) return -EIO;
         unsigned int base = c == 2 ? (unsigned int)size : c == 1 ? file->position : 0;
         long long position = (long long)base + (int)b;
@@ -384,9 +379,8 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
         char path[PATH_SIZE]; int error = copy_path(path, a);
         if (error) return error;
         if (b & ~7U) return -LINUX_EINVAL;
-        /* Permission metadata is not exposed by the current VFS. */
-        if (b) return -LINUX_ENOSYS;
-        return fs_size(path) >= 0 || fs_is_dir(path) ? 0 : -ENOENT;
+        if(((b&4)&&!check_permission(path,'r'))||((b&2)&&!check_permission(path,'w'))||((b&1)&&!check_permission(path,'x')))return -13;
+        return fs_file_size(path) >= 0 || fs_is_dir(path) ? 0 : -ENOENT;
     }
     case LINUX_SYS_ioctl: {
         OpenFile *file = get_file(a);
