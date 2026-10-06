@@ -39,6 +39,8 @@ qemu-w64-setup-20260729.exe
 
 /Setup/target-efi.img
 /Setup/OVMF_VARS.fd
+/Setup/execute-backup-bmrs154t/
+/РАСПАКУЙ.zip
 
 /tests/permissions_test
 
