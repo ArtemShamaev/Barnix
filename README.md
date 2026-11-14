@@ -39,10 +39,13 @@ sudo apt install build-essential gcc-multilib grub-pc-bin grub-efi-amd64-bin \
     grub-common xorriso mtools qemu-system-x86 e2fsprogs python3 python3-pil \
     fonts-liberation default-jdk-headless zlib1g-dev
 
-make          # собрать barnix.iso и установочные образы
-make run      # запустить в QEMU с постоянным диском
-make run-cd   # запустить только с CD, без диска
+make barnix.iso   # собрать образ системы
+make run          # запустить в QEMU с постоянным диском
+make run-cd       # запустить только с CD, без диска
 ```
+
+Установочные образы (`make setup`) дополнительно требуют собранного порта GCC
+для Barnix (`live-ext2-gcc.img`, см. [справочник](docs/REFERENCE.md)).
 
 При первом запуске Barnix попросит задать пароль root и создать пользователя.
 Команда `help` покажет список команд. `Ctrl+Alt+F` переключает QEMU на полный экран.
