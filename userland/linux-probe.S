@@ -15,9 +15,14 @@ _start:
     jne fail
     cmpl $0, 12(%esp)       /* argv terminator */
     jne fail
-    cmpl $0, 16(%esp)       /* empty envp (test runs with env -i) */
+    /* Path-based launches include PATH for child compiler tools. */
+    movl 16(%esp), %esi
+    movl $expected_path, %edi
+    movl $19, %ecx
+    cld
+    repe cmpsb
     jne fail
-    cmpl $0, zero
+    cmpl $0, 20(%esp)       /* envp terminator */
     jne fail
     movl $99, zero
     movl $0x12345678, %ebx
@@ -88,6 +93,7 @@ privileged:
 .section .rodata
 message: .ascii "Linux ABI probe passed\n"
 message_end:
+expected_path: .asciz "PATH=/usr/bin:/bin"
 .section .bss
 .align 4
 zero: .skip 4

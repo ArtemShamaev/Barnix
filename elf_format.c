@@ -1,4 +1,5 @@
 #include "elf_format.h"
+#include "linux_limits.h"
 
 typedef struct {
     uint8_t ident[16];
@@ -37,7 +38,7 @@ const char *elf_validate(const void *data, unsigned int size, ElfPlan *plan)
     if (!h.phnum || h.phnum > ELF_MAX_SEGMENTS || h.phentsize != sizeof(ProgramHeader) ||
         h.phoff > size || h.phnum > (size - h.phoff) / sizeof(ProgramHeader))
         return "invalid program header table";
-    if (h.ident[7] == 255 && (h.ident[8] == BARNIX_APP_ABI || h.ident[8] == 8 || h.ident[8] == 7)) plan->legacy = 1;
+    if (h.ident[7] == 255 && (h.ident[8] == BARNIX_APP_ABI || (h.ident[8] >= 7 && h.ident[8] < BARNIX_APP_ABI))) plan->legacy = 1;
     else if ((h.ident[7] != 0 && h.ident[7] != 3) || h.ident[8])
         return "unsupported ELF OS/ABI or ABI version";
     uint32_t lowest = 0xffffffffU;
@@ -50,9 +51,11 @@ const char *elf_validate(const void *data, unsigned int size, ElfPlan *plan)
     if (plan->base != APP_LOAD_MIN &&
         (plan->base < 0x02000000U || plan->base > 0xbfc00000U))
         return "unsupported ELF virtual address window";
-    plan->stack_top = plan->base + (APP_STACK_TOP - APP_LOAD_MIN);
+    plan->stack_top = plan->base + (plan->base == LINUX_LARGE_BASE && !plan->legacy ?
+                                     LINUX_LARGE_ARENA_SIZE : APP_STACK_TOP - APP_LOAD_MIN);
     plan->phoff = h.phoff; plan->phnum = h.phnum;
-    uint32_t load_end = plan->stack_top - APP_STACK_SIZE;
+    uint32_t load_end = plan->stack_top -
+        (plan->base == LINUX_LARGE_BASE && !plan->legacy ? LINUX_LARGE_STACK_SIZE : APP_STACK_SIZE);
     int executable_entry = 0;
     for (unsigned int i = 0; i < h.phnum; i++)
     {
@@ -60,11 +63,18 @@ const char *elf_validate(const void *data, unsigned int size, ElfPlan *plan)
         copy(&p, (const unsigned char *)data + h.phoff + i * sizeof(p), sizeof(p));
         if (p.type == 2 || p.type == 3)
             return "ELF interpreter/dynamic linking is not implemented";
-        if (p.type == 7) return "ELF TLS is not implemented";
+        if (p.type == 7) {
+            /* PT_TLS is metadata consumed by static libc; its bytes must also
+             * reside in PT_LOAD. The kernel's thread-area syscall supplies GS. */
+            if (p.filesz > p.memsz || p.offset > size || p.filesz > size - p.offset)
+                return "invalid ELF TLS file range";
+            continue;
+        }
         if (p.type != 1)
         {
             if (p.type != 0 && p.type != 4 && p.type != 6 &&
-                p.type != 0x6474e551 && p.type != 0x6474e552 && p.type != 0x6474e553)
+                p.type != 0x6474e550 && p.type != 0x6474e551 &&
+                p.type != 0x6474e552 && p.type != 0x6474e553)
                 return "unsupported program header";
             continue;
         }

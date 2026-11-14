@@ -45,6 +45,8 @@
 #define LINUX_SYS_stat __NR_stat
 #define LINUX_SYS_fstat __NR_fstat
 #define LINUX_SYS_stat64 __NR_stat64
+#define LINUX_SYS_lstat64 __NR_lstat64
+#define LINUX_SYS_fstat64 __NR_fstat64
 #define LINUX_SYS_getcwd __NR_getcwd
 #define LINUX_SYS_exit_group __NR_exit_group
 #define LINUX_SYS_getgid __NR_getgid

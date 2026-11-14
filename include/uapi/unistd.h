@@ -45,6 +45,8 @@
 #define __NR_stat 106
 #define __NR_fstat 108
 #define __NR_stat64 195
+#define __NR_lstat64 196
+#define __NR_fstat64 197
 #define __NR_getcwd 183
 #define __NR_exit_group 252
 #define __NR_getgid 47
@@ -54,4 +56,5 @@
 #define __NR_geteuid32 201
 #define __NR_getegid32 202
 #define __NR_sched_yield 158
+#define __NR_set_thread_area 243
 #endif

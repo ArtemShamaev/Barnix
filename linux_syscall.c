@@ -3,19 +3,22 @@
 #include "linux_task.h"
 #include "linux_user.h"
 #include "linux_memory.h"
+#include "linux_tss.h"
 #include "fs.h"
 #include "permissions.h"
 #include "barnix.h"
 #include "keyboard.h"
+#include "elf.h"
+void net_random(void *out, unsigned int length);
 
 /* A deliberately bounded, synchronous Linux i386 ABI. Unsupported operations
  * fail with ENOSYS; they must not report success without doing the work. */
-enum { FD_COUNT = 16, PATH_SIZE = 128, EFAULT = 14, ENOENT = 2,
+enum { FD_COUNT = 16, PATH_SIZE = 512, EFAULT = 14, ENOENT = 2,
        EIO = 5, EACCES = 13, EMFILE = 24, ENOTTY = 25, ESPIPE = 29,
        EISDIR = 21, ENAMETOOLONG = 36, EFBIG = 27, EAGAIN = 11, ENFILE = 23 };
 enum { O_ACCMODE = 3, O_WRONLY = 1, O_RDWR = 2, O_CREAT = 64,
-       O_EXCL = 128, O_TRUNC = 512, O_APPEND = 1024, O_NONBLOCK = 2048,
-       O_DIRECTORY = 65536, O_CLOEXEC = 02000000 };
+       O_EXCL = 128, O_NOCTTY = 256, O_TRUNC = 512, O_APPEND = 1024, O_NONBLOCK = 2048,
+       O_LARGEFILE = 32768, O_DIRECTORY = 65536, O_NOFOLLOW = 0400000, O_CLOEXEC = 02000000 };
 enum { PIPE_SIZE = 4096, PIPE_COUNT = FD_COUNT * LINUX_TASK_LIMIT / 2, IOV_MAX = 1024 };
 typedef struct {
     unsigned int readers, writers, head, used;
@@ -28,6 +31,21 @@ typedef struct {
     char name[PATH_SIZE];
 } OpenFile;
 typedef struct { unsigned int address, length; } IoVector;
+/* Linux i386 stat64 layout: the 32-bit inode at 12 coexists with st_ino at 88. */
+typedef struct __attribute__((packed)) {
+    unsigned long long device;
+    unsigned int pad1, inode_legacy, mode, links, uid, gid;
+    unsigned long long rdevice;
+    unsigned int pad2;
+    unsigned long long size;
+    unsigned int block_size;
+    unsigned long long blocks;
+    unsigned int atime, atime_nsec, mtime, mtime_nsec, ctime, ctime_nsec;
+    unsigned long long inode;
+} LinuxStat64;
+_Static_assert(sizeof(LinuxStat64) == 96 &&
+               __builtin_offsetof(LinuxStat64, size) == 44 &&
+               __builtin_offsetof(LinuxStat64, inode) == 88, "Linux i386 stat64 layout");
 typedef struct {
     int active, writing;
     unsigned int fd, count, index, offset, total, length;
@@ -39,12 +57,20 @@ static OpenFile descriptions[FD_COUNT * LINUX_TASK_LIMIT];
 static OpenFile *task_files[LINUX_TASK_LIMIT][FD_COUNT];
 static unsigned int task_flags[LINUX_TASK_LIMIT][FD_COUNT];
 static unsigned int file_task;
+static unsigned int clock_calls;
+static unsigned char signal_actions[LINUX_TASK_LIMIT][65][20];
+static unsigned char signal_masks[LINUX_TASK_LIMIT][8];
+static unsigned int task_umask[LINUX_TASK_LIMIT];
 #define files task_files[file_task]
 #define descriptor_flags task_flags[file_task]
 
 
 void linux_syscall_reset(void)
 {
+    clock_calls = 0;
+    memset(signal_actions, 0, sizeof(signal_actions));
+    memset(signal_masks, 0, sizeof(signal_masks));
+    for (unsigned int slot = 0; slot < LINUX_TASK_LIMIT; slot++) task_umask[slot] = 022;
     memset(descriptions, 0, sizeof(descriptions));
     memset(pipes, 0, sizeof(pipes));
     memset(pending_io, 0, sizeof(pending_io));
@@ -80,11 +106,15 @@ void linux_syscall_exec(void)
 {
     for (unsigned int fd = 0; fd < FD_COUNT; fd++)
         if (files[fd] && (descriptor_flags[fd] & 1)) close_fd(fd);
+    memset(signal_actions[file_task], 0, sizeof(signal_actions[file_task]));
 }
 void linux_files_switch(unsigned int slot) { file_task = slot; }
 void linux_files_fork(unsigned int parent, unsigned int child)
 {
     pending_io[child].active = 0;
+    memcpy(signal_actions[child], signal_actions[parent], sizeof(signal_actions[child]));
+    memcpy(signal_masks[child], signal_masks[parent], sizeof(signal_masks[child]));
+    task_umask[child] = task_umask[parent];
     for (unsigned int fd = 0; fd < FD_COUNT; fd++) {
         task_files[child][fd] = task_files[parent][fd];
         task_flags[child][fd] = task_flags[parent][fd];
@@ -219,6 +249,27 @@ static int copy_path(char *out, unsigned int address)
     }
     return -ENAMETOOLONG;
 }
+static int copy_stat64(unsigned int address, const FsFileInfo *info)
+{
+    if (!linux_user_range(address, sizeof(LinuxStat64))) return -EFAULT;
+    LinuxStat64 stat;
+    memset(&stat, 0, sizeof(stat));
+    stat.device = 1;
+    stat.inode_legacy = info->inode;
+    stat.inode = info->inode;
+    stat.mode = info->mode;
+    stat.links = info->links;
+    stat.uid = info->uid;
+    stat.gid = info->gid;
+    stat.size = info->size;
+    stat.block_size = 1024;
+    stat.blocks = info->blocks;
+    stat.atime = info->atime;
+    stat.mtime = info->mtime;
+    stat.ctime = info->ctime;
+    memcpy((void *)address, &stat, sizeof(stat));
+    return 0;
+}
 static int transfer(unsigned int fd, unsigned int address, unsigned int count, int writing)
 {
     OpenFile *file = get_file(fd);
@@ -230,11 +281,25 @@ static int transfer(unsigned int fd, unsigned int address, unsigned int count, i
     if (!linux_user_range(address, count)) return -EFAULT;
     unsigned char *data = (unsigned char *)address;
     if (file->terminal) {
-        if (!writing) { data[0] = (unsigned char)getch(); return 1; }
-        for (unsigned int i = 0; i < count; i++) {
-            char character[2] = {(char)data[i], 0};
-            print(WHITE, character);
+        if (!writing) {
+            /* A terminal reads whole lines, shown as they are typed
+             * (backspace, Ctrl+V paste), like a Linux tty in canonical mode. */
+            static char line[258];
+            static unsigned int line_length, line_at;
+            if (line_at >= line_length) {
+                elf_nested_input();
+                input(line, 256, "");
+                console_capture_add(line); console_capture_add("\n");   /* the transcript shows what was typed */
+                line_length = (unsigned int)strlen(line);
+                line[line_length++] = '\n';
+                line_at = 0;
+            }
+            unsigned int n = 0;
+            while (n < count && line_at < line_length) data[n++] = (unsigned char)line[line_at++];
+            return (int)n;
         }
+        for (unsigned int i = 0; i < count; i++) __asm__ volatile("outb %0, %1" : : "a"(data[i]), "Nd"((unsigned short)0xe9));
+        console_ansi_write((const char *)data, count);
         return (int)count;
     }
     if (!writing) {
@@ -258,6 +323,106 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
         linux_leave_user(a & 255);
     case LINUX_SYS_execve: return linux_execve(a, b, c);
     case LINUX_SYS_brk: return linux_memory_brk(a);
+    case 125: return linux_memory_protect(a, b, c); /* mprotect */
+    case __NR_mmap2: {
+        unsigned int flags = frame->esi, fd = frame->edi, page_offset = frame->ebp;
+        if (flags & 16U || (flags & 3U) != 2U ||
+            (flags & ~(1U | 2U | 16U | 32U | 0x20000U))) return -LINUX_EINVAL;
+        OpenFile *file = 0;
+        if (!(flags & 32U)) {
+            file = get_file(fd);
+            if (!file) return -LINUX_EBADF;
+            if (file->directory || file->terminal || file->pipe ||
+                (file->flags & O_ACCMODE) == O_WRONLY) return -LINUX_EINVAL;
+            if (page_offset > 0x7ffffU) return -LINUX_EINVAL;
+        }
+        int mapped = linux_memory_map(b, 3);
+        if ((unsigned int)mapped >= 0xfffff000U) return mapped;
+        if (file) {
+            int got = fs_read(file->name, page_offset * 4096U, (void *)(unsigned int)mapped, b);
+            if (got < 0) { linux_memory_unmap((unsigned int)mapped, b); return -EIO; }
+        }
+        if (!(c & 2U)) linux_memory_protect((unsigned int)mapped, b, c | 1U);
+        return mapped;
+    }
+    case __NR_munmap: return linux_memory_unmap(a, b);
+    case __NR_clock_gettime:
+    case 403: { /* clock_gettime64: i386 uses two 64-bit fields. */
+        if (a > 11 || !linux_user_range(b, frame->eax == 403 ? 16 : 8)) return -LINUX_EINVAL;
+        unsigned int tick = clock_calls++;
+        unsigned int sec = (a == 0 || a == 5 || a == 8) ? 1790000000U + tick / 1000 : tick / 1000;
+        unsigned int nsec = tick % 1000 * 1000000U;
+        if (frame->eax == 403) {
+            unsigned int result[4] = {sec, 0, nsec, 0};
+            memcpy((void *)b, result, sizeof(result));
+        } else {
+            unsigned int result[2] = {sec, nsec};
+            memcpy((void *)b, result, sizeof(result));
+        }
+        return 0;
+    }
+    case __NR_gettimeofday: {
+        if (a) {
+            if (!linux_user_range(a, 8)) return -EFAULT;
+            unsigned int result[2] = {1790000000U + clock_calls / 1000, clock_calls % 1000 * 1000U};
+            memcpy((void *)a, result, sizeof(result));
+            clock_calls++;
+        }
+        if (b) { if (!linux_user_range(b, 8)) return -EFAULT; memset((void *)b, 0, 8); }
+        return 0;
+    }
+    case __NR_nanosleep: {
+        if (!linux_user_range(a, 8)) return -EFAULT;
+        const unsigned int *request = (const unsigned int *)a;
+        if (request[1] >= 1000000000U) return -LINUX_EINVAL;
+        clock_calls += request[0] * 1000U + request[1] / 1000000U + 1U;
+        if (b) { if (!linux_user_range(b, 8)) return -EFAULT; memset((void *)b, 0, 8); }
+        return 0;
+    }
+    case 240:
+    case 422: { /* futex and futex_time64; no CLONE_THREAD support yet. */
+        if ((a & 3U) || !linux_user_range(a, 4)) return -EFAULT;
+        unsigned int operation = b & ~128U; /* FUTEX_PRIVATE_FLAG */
+        if (operation == 1 || operation == 10) return 0; /* WAKE, WAKE_BITSET */
+        if (operation == 0 || operation == 9) return -EAGAIN; /* no peer can wake us */
+        return -LINUX_ENOSYS;
+    }
+    case __NR_rt_sigaction: {
+        if (a == 0 || a > 64 || frame->esi != 8) return -LINUX_EINVAL;
+        if (c) {
+            if (!linux_user_range(c, 20)) return -EFAULT;
+            memcpy((void *)c, signal_actions[file_task][a], 20);
+        }
+        if (b) {
+            if (!linux_user_range(b, 20)) return -EFAULT;
+            if (a == 9 || a == 19) return -LINUX_EINVAL;
+            memcpy(signal_actions[file_task][a], (const void *)b, 20);
+        }
+        return 0;
+    }
+    case __NR_rt_sigprocmask: {
+        if (frame->esi != 8) return -LINUX_EINVAL;
+        if (c) {
+            if (!linux_user_range(c, 8)) return -EFAULT;
+            memcpy((void *)c, signal_masks[file_task], 8);
+        }
+        if (b) {
+            if (!linux_user_range(b, 8)) return -EFAULT;
+            if (a > 2) return -LINUX_EINVAL;
+            const unsigned char *set = (const unsigned char *)b;
+            for (unsigned int i = 0; i < 8; i++) {
+                if (a == 0) signal_masks[file_task][i] |= set[i];
+                else if (a == 1) signal_masks[file_task][i] &= ~set[i];
+                else signal_masks[file_task][i] = set[i];
+            }
+            signal_masks[file_task][1] &= ~0x01U; /* SIGKILL cannot be masked. */
+            signal_masks[file_task][2] &= ~0x04U; /* SIGSTOP cannot be masked. */
+        }
+        return 0;
+    }
+    case __NR_set_thread_area: return linux_tss_set_thread_area(a);
+    case __NR_set_tid_address: return 1;
+    case 224:   /* gettid: one thread per process */
     case LINUX_SYS_getpid:
     case LINUX_SYS_getpgrp: return 1;
     case LINUX_SYS_getppid: return 0;
@@ -273,7 +438,49 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
     case __NR_pipe: return create_pipe(a, 0);
     case __NR_pipe2: return create_pipe(a, b);
     case LINUX_SYS_close: return close_fd(a);
-    case LINUX_SYS_open: {
+    case 60: { /* umask */
+        unsigned int old = task_umask[file_task];
+        task_umask[file_task] = a & 0777U;
+        return old;
+    }
+    case 15: { /* chmod */
+        char path[PATH_SIZE]; int error = copy_path(path, a);
+        return error ? error : fs_chmod(path, b) ? -EACCES : 0;
+    }
+    case 94: { /* fchmod */
+        OpenFile *file = get_file(a);
+        if (!file) return -LINUX_EBADF;
+        if (file->terminal || file->pipe) return -LINUX_EINVAL;
+        return fs_chmod(file->name, b) ? -EACCES : 0;
+    }
+    case 306: { /* fchmodat */
+        if (a != (unsigned int)-100 || frame->esi) return -LINUX_EINVAL;
+        char path[PATH_SIZE]; int error = copy_path(path, b);
+        return error ? error : fs_chmod(path, c) ? -EACCES : 0;
+    }
+    case 10:
+    case 301: { /* unlink, unlinkat */
+        if (frame->eax == 301) {
+            if (a != (unsigned int)-100 || c) return -LINUX_EINVAL;
+            a = b;
+        }
+        char path[PATH_SIZE]; int error = copy_path(path, a);
+        return error ? error : fs_rm(path) ? -ENOENT : 0;
+    }
+    case 38: { /* rename */
+        char old_path[PATH_SIZE], new_path[PATH_SIZE];
+        int error = copy_path(old_path, a);
+        if (error) return error;
+        error = copy_path(new_path, b);
+        return error ? error : fs_mv(old_path, new_path) ? -EIO : 0;
+    }
+    case LINUX_SYS_open:
+    case 295: { /* openat */
+        unsigned int create_mode = frame->eax == 295 ? frame->esi : c;
+        if (frame->eax == 295) {
+            if (a != (unsigned int)-100) return -LINUX_EBADF;
+            a = b; b = c;
+        }
         char path[PATH_SIZE];
         int error = copy_path(path, a);
         if (error) return error;
@@ -287,7 +494,8 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
             strcpy(cwd + prefix, path); strcpy(path, cwd);
         }
         if ((b & O_ACCMODE) == 3) return -LINUX_EINVAL;
-        if (b & ~(O_ACCMODE | O_CREAT | O_EXCL | O_TRUNC | O_APPEND | O_NONBLOCK | O_DIRECTORY | O_CLOEXEC))
+        if (b & ~(O_ACCMODE | O_CREAT | O_EXCL | O_NOCTTY | O_TRUNC | O_APPEND | O_NONBLOCK | O_LARGEFILE | O_DIRECTORY |
+                  O_NOFOLLOW | O_CLOEXEC))   /* no symbolic links: O_NOFOLLOW holds anyway */
             return -LINUX_EINVAL;
         int fd = free_fd(0);
         if (fd < 0) return fd;
@@ -304,10 +512,11 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
         if (size < 0) {
             if (!(b & O_CREAT)) return -ENOENT;
             if (fs_write(path, "", 0)) return -EIO;
+            if (fs_chmod(path, (create_mode & 0777U) & ~task_umask[file_task])) return -EIO;
         }
         if ((b & O_TRUNC) && (b & O_ACCMODE) && fs_write(path, "", 0)) return -EIO;
         memset(file, 0, sizeof(*file));
-        file->refs = 1; file->flags = b & (O_ACCMODE | O_APPEND | O_NONBLOCK | O_DIRECTORY);
+        file->refs = 1; file->flags = b & (O_ACCMODE | O_APPEND | O_NONBLOCK | O_LARGEFILE | O_DIRECTORY);
         file->directory = directory;
         strcpy(file->name, path);
         files[fd] = file;
@@ -325,7 +534,8 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
         files[fd] = file; file->refs++; descriptor_flags[fd] = 0;
         return fd;
     }
-    case LINUX_SYS_fcntl: {
+    case LINUX_SYS_fcntl:
+    case 221: { /* fcntl64 */
         OpenFile *file = get_file(a);
         if (!file) return -LINUX_EBADF;
         if (b == 0) { /* F_DUPFD */
@@ -338,9 +548,9 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
         if (b == 2) { descriptor_flags[a] = c & 1; return 0; }
         if (b == 3) return file->flags;
         if (b == 4) {
-            if (c & ~(O_ACCMODE | O_APPEND | O_NONBLOCK | O_DIRECTORY)) return -LINUX_EINVAL;
+            if (c & ~(O_ACCMODE | O_APPEND | O_NONBLOCK | O_LARGEFILE | O_DIRECTORY)) return -LINUX_EINVAL;
             if (file->terminal && (c & O_NONBLOCK)) return -LINUX_EINVAL;
-            file->flags = (file->flags & (O_ACCMODE | O_DIRECTORY)) | (c & (O_APPEND | O_NONBLOCK));
+            file->flags = (file->flags & (O_ACCMODE | O_LARGEFILE | O_DIRECTORY)) | (c & (O_APPEND | O_NONBLOCK));
             return 0;
         }
         if (b == 1032 && file->pipe) return PIPE_SIZE; /* F_GETPIPE_SZ */
@@ -360,6 +570,68 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
         file->position = (unsigned int)position;
         return (int)position;
     }
+    case 140: { /* _llseek: 64-bit result through a user pointer. */
+        OpenFile *file = get_file(a);
+        if (!file) return -LINUX_EBADF;
+        if (file->terminal || file->pipe) return -ESPIPE;
+        if (!linux_user_range(frame->esi, 8)) return -EFAULT;
+        if (frame->edi > 2) return -LINUX_EINVAL;
+        int size = fs_file_size(file->name);
+        if (size < 0) return -EIO;
+        long long offset = (long long)(int)b * 0x100000000LL + c;
+        long long base = frame->edi == 2 ? size : frame->edi == 1 ? file->position : 0;
+        long long position = base + offset;
+        if (position < 0 || position > 0x7fffffffLL) return -LINUX_EINVAL;
+        file->position = (unsigned int)position;
+        unsigned long long result = (unsigned long long)position;
+        memcpy((void *)frame->esi, &result, sizeof(result));
+        return 0;
+    }
+    case LINUX_SYS_stat64:
+    case LINUX_SYS_lstat64: {
+        char path[PATH_SIZE]; FsFileInfo info;
+        int error = copy_path(path, a);
+        if (error) return error;
+        error = fs_file_info(path, &info);
+        return error ? (error == -EACCES ? error : -ENOENT) : copy_stat64(b, &info);
+    }
+    case 300: { /* fstatat64 */
+        if (frame->esi & ~0x1100U) return -LINUX_EINVAL;
+        if (a != (unsigned int)-100 && a >= FD_COUNT) return -LINUX_EBADF;
+        char path[PATH_SIZE]; FsFileInfo info;
+        if (!linux_user_range(b, 1)) return -EFAULT;
+        if (!*(const char *)b && (frame->esi & 0x1000U)) {
+            OpenFile *file = get_file(a);
+            if (!file) return -LINUX_EBADF;
+            if (file->terminal || file->pipe) {   /* fstat() of glibc: as fstat64 */
+                memset(&info, 0, sizeof(info));
+                info.links = 1;
+                if (file->terminal) info.mode = 0020666;
+                else { info.mode = 0010600; info.size = file->pipe->used; }
+                return copy_stat64(c, &info);
+            }
+            strcpy(path, file->name);
+        } else {
+            int error = copy_path(path, b);
+            if (error) return error;
+            if (path[0] != '/' && a != (unsigned int)-100) return -LINUX_EINVAL;
+        }
+        int error = fs_file_info(path, &info);
+        return error ? -ENOENT : copy_stat64(c, &info);
+    }
+    case LINUX_SYS_fstat64: {
+        OpenFile *file = get_file(a);
+        if (!file) return -LINUX_EBADF;
+        FsFileInfo info;
+        memset(&info, 0, sizeof(info));
+        if (file->terminal) { info.mode = 0020666; info.links = 1; }
+        else if (file->pipe) { info.mode = 0010600; info.links = 1; info.size = file->pipe->used; }
+        else {
+            int error = fs_file_info(file->name, &info);
+            if (error) return error == -EACCES ? error : -EIO;
+        }
+        return copy_stat64(b, &info);
+    }
     case LINUX_SYS_getdents: {
         OpenFile *file = get_file(a);
         if (!file) return -LINUX_EBADF;
@@ -367,6 +639,92 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
         if (!linux_user_range(b, c)) return -EFAULT;
         return fs_getdents(file->name, (void *)b, c, &file->position);
     }
+    case 220: { /* getdents64: the getdents records, widened (opendir in modern glibc) */
+        OpenFile *file = get_file(a);
+        if (!file) return -LINUX_EBADF;
+        if (!file->directory) return -20;
+        if (!linux_user_range(b, c)) return -EFAULT;
+        static unsigned char old[1024];
+        unsigned int out = 0;
+        for (;;) {
+            unsigned int position = file->position;
+            int n = fs_getdents(file->name, old, sizeof(old), &position);
+            if (n < 0) return out ? (int)out : n;
+            if (!n) return (int)out;
+            for (int at = 0; at < n;) {
+                unsigned char *r = old + at;
+                unsigned int ino = r[0] | r[1] << 8 | r[2] << 16 | (unsigned int)r[3] << 24;
+                unsigned int next = r[4] | r[5] << 8 | r[6] << 16 | (unsigned int)r[7] << 24;
+                unsigned int length = r[8] | r[9] << 8, name = (unsigned int)strlen((const char *)r + 10);
+                unsigned int need = (19 + name + 1 + 7) & ~7U;
+                if (out + need > c) return out ? (int)out : -LINUX_EINVAL;
+                unsigned char *d = (unsigned char *)b + out;
+                memset(d, 0, (int)need);
+                memcpy(d, &ino, 4); memcpy(d + 8, &next, 4);
+                d[16] = (unsigned char)need; d[17] = (unsigned char)(need >> 8); d[18] = length ? r[length - 1] : 0;
+                memcpy(d + 19, r + 10, (int)name);
+                out += need; file->position = next;
+                if (!length) break;
+                at += (int)length;
+            }
+        }
+    }
+    case 311: return 0;              /* set_robust_list: no threads to clean up after */
+    case 383: case 386: return -LINUX_ENOSYS;   /* statx, rseq: glibc falls back quietly */
+    case 355: /* getrandom */
+        if (!linux_user_range(a, b)) return -EFAULT;
+        net_random((void *)a, b);
+        return (int)b;
+    case 39:
+    case 296: { /* mkdir, mkdirat */
+        if (frame->eax == 296) { if (a != (unsigned int)-100) return -LINUX_EBADF; a = b; }
+        char path[PATH_SIZE]; int error = copy_path(path, a);
+        if (error) return error;
+        if (fs_is_dir(path) || fs_file_size(path) >= 0) return -17;   /* EEXIST */
+        char parent[PATH_SIZE]; strcpy(parent, path);
+        char *slash = 0;
+        for (char *q = parent; *q; q++) if (*q == '/') slash = q;
+        if (slash) { if (slash == parent) slash[1] = 0; else *slash = 0; if (!fs_is_dir(parent)) return -ENOENT; }
+        return fs_mkdir(path) ? -13 : 0;
+    }
+    case 40: { /* rmdir */
+        char path[PATH_SIZE]; int error = copy_path(path, a);
+        return error ? error : fs_rmdir(path) ? -39 : 0;   /* ENOTEMPTY (or missing) */
+    }
+    case 85:
+    case 305: { /* readlink, readlinkat: Barnix has no symbolic links */
+        char path[PATH_SIZE]; int error = copy_path(path, frame->eax == 305 ? b : a);
+        if (error) return error;
+        return fs_is_dir(path) || fs_file_size(path) >= 0 ? -LINUX_EINVAL : -ENOENT;
+    }
+    case 76:
+    case 191: /* getrlimit, ugetrlimit: no limits */
+        if (!linux_user_range(b, 8)) return -EFAULT;
+        memset((void *)b, 0xff, 8);
+        return 0;
+    case 340: /* prlimit64 (pid, resource, new, old) */
+        if (frame->esi) { if (!linux_user_range(frame->esi, 16)) return -EFAULT; memset((void *)frame->esi, 0xff, 16); }
+        return 0;
+    case 242: /* sched_getaffinity: one processor */
+        if (b < 4 || !linux_user_range(c, b < 128 ? b : 128)) return -LINUX_EINVAL;
+        memset((void *)c, 0, (int)(b < 128 ? b : 128)); *(unsigned char *)c = 1;
+        return 4;
+    case 186: /* sigaltstack: none */
+        if (b) { if (!linux_user_range(b, 12)) return -EFAULT; memset((void *)b, 0, 12); ((unsigned int *)b)[1] = 2; }
+        return 0;
+    case 77: /* getrusage */
+        if (!linux_user_range(b, 72)) return -EFAULT;
+        memset((void *)b, 0, 72);
+        return 0;
+    case 266:
+    case 406: /* clock_getres, clock_getres_time64: a microsecond */
+        if (b) {
+            unsigned int words = frame->eax == 406 ? 4 : 2;
+            if (!linux_user_range(b, words * 4)) return -EFAULT;
+            memset((void *)b, 0, (int)words * 4);
+            ((unsigned int *)b)[words == 4 ? 2 : 1] = 1000;
+        }
+        return 0;
     case LINUX_SYS_getcwd:
         if (!b) return -LINUX_EINVAL;
         if (!linux_user_range(a, b)) return -EFAULT;
@@ -389,6 +747,38 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
             if (!linux_user_range(c, 4)) return -EFAULT;
             memcpy((void *)c, &file->pipe->used, 4);
             return 0;
+        }
+        if (file->terminal) {   /* the console: isatty() and a line-editing tty */
+            if (b == 0x5401 || b == 0x802c542aU) {   /* TCGETS, TCGETS2 (newer glibc): canonical mode with echo */
+                unsigned int size = b == 0x5401 ? 36 : 44;
+                if (!linux_user_range(c, size)) return -EFAULT;
+                unsigned int *t = (unsigned int *)c;
+                memset(t, 0, (int)size);
+                if (size == 44) { t[9] = 38400; t[10] = 38400; }   /* c_ispeed, c_ospeed */
+                t[0] = 0x100;          /* ICRNL */
+                t[1] = 0x5;            /* OPOST | ONLCR */
+                t[2] = 0xbf;           /* B38400 | CS8 | CREAD */
+                t[3] = 0x8a3b;         /* ISIG | ICANON | ECHO | ECHOE | ECHOK | ECHOCTL | ECHOKE | IEXTEN */
+                unsigned char *cc = (unsigned char *)c + 17;
+                cc[0] = 3; cc[1] = 28; cc[2] = 127; cc[3] = 21; cc[4] = 4; cc[6] = 1;   /* ^C ^\ DEL ^U ^D, VMIN 1 */
+                return 0;
+            }
+            if ((b >= 0x5402 && b <= 0x5404) || (b >= 0x402c542bU && b <= 0x402c542dU)) return 0;   /* TCSETS*, TCSETS2*: the console keeps its mode */
+            if (b == 0x5413) {   /* TIOCGWINSZ */
+                if (!linux_user_range(c, 8)) return -EFAULT;
+                unsigned short *size = (unsigned short *)c;
+                size[0] = 25; size[1] = 80; size[2] = 640; size[3] = 400;
+                return 0;
+            }
+            if (b == 0x540f) {   /* TIOCGPGRP */
+                if (!linux_user_range(c, 4)) return -EFAULT;
+                *(int *)c = 1; return 0;
+            }
+            {   /* others are noted on the debug console, as missing system calls */
+                char note[] = "[linux: tty ioctl 00000000 is missing]\n";
+                for (int i = 0; i < 8; i++) note[17 + i] = "0123456789abcdef"[(b >> (28 - 4 * i)) & 15];
+                for (const char *q = note; *q; q++) __asm__ volatile("outb %0, %1" : : "a"(*q), "Nd"((unsigned short)0xe9));
+            }
         }
         return -ENOTTY;
     }
@@ -423,6 +813,12 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
         }
         return total;
     }
-    default: return -LINUX_ENOSYS;
+    default: {   /* unknown: noted on the debug console (QEMU -debugcon), for porting programs */
+        unsigned int n = frame->eax;
+        char note[] = "[linux: syscall 000 is missing]\n";
+        note[16] = (char)('0' + n / 100 % 10); note[17] = (char)('0' + n / 10 % 10); note[18] = (char)('0' + n % 10);
+        for (const char *q = note; *q; q++) __asm__ volatile("outb %0, %1" : : "a"(*q), "Nd"((unsigned short)0xe9));
+        return -LINUX_ENOSYS;
+    }
     }
 }

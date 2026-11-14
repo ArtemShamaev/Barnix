@@ -8,11 +8,19 @@
 #include "barnix.h"
 #include "fs.h"
 #include "permissions.h"
+#include "memory.h"
+#include "linux_limits.h"
 
 /* Staging is kernel-owned: exec must finish reading every user pointer before
  * replacing the address space. Cooperative tasks share this staging area. */
 enum { VECTOR_MAX = 64, STRING_MAX = 8192, EXEC_PATH_MAX = 128 };
-static unsigned char image_buffer[FS_MAX_FILE_SIZE];
+/* Executable files can include sections that are not mapped into the 4 MiB
+ * process window. Use extended RAM for staging when it is available. */
+static unsigned char fallback_image[640 * 1024];
+static unsigned char *image_buffer;
+static unsigned int image_capacity;
+static void release_large(void);
+static LinuxMemoryState exec_previous_memory;
 static struct {
     ElfPlan plan;
     char strings[STRING_MAX], path[EXEC_PATH_MAX];
@@ -53,12 +61,15 @@ static int stage_vector(unsigned int address, unsigned int offset, unsigned int 
 static unsigned int install_image(const void *image)
 {
     const ElfPlan *plan = &staged.plan;
-    unsigned int delta = plan->base - APP_LOAD_MIN;
-    unsigned int sp = APP_STACK_TOP;
-    memset((void *)APP_LOAD_MIN, 0, APP_STACK_TOP - APP_LOAD_MIN);
+    unsigned int physical = (unsigned int)linux_memory_physical_base(plan->base);
+    unsigned int arena_size = linux_memory_arena_size(plan->base);
+    unsigned int delta = plan->base - physical;
+    unsigned int sp = physical + arena_size;
+    memset((void *)physical, 0, arena_size);
     for (unsigned int i = 0; i < plan->count; i++) {
         const ElfSegment *s = &plan->segments[i];
-        memcpy((void *)(s->address - delta), (const unsigned char *)image + s->offset, s->file_size);
+        memcpy((void *)(physical + s->address - plan->base),
+               (const unsigned char *)image + s->offset, s->file_size);
     }
     sp -= staged.used;
     memcpy((void *)sp, staged.strings, staged.used);
@@ -112,11 +123,20 @@ int linux_run_image(const void *image, unsigned int size, int argc,
         error = stage_string((unsigned int)argv[i], 0, &staged.offsets[i]);
         if (error) return error;
     }
+    /* GCC and other drivers need PATH when launching their child tools. */
+    error = stage_string((unsigned int)"PATH=/usr/bin:/bin", 0,
+                         &staged.offsets[VECTOR_MAX]);
+    if (error) return error;
+    staged.envc = 1;
     if (argc) {
         unsigned int n = strlen(argv[0]);
         if (n >= sizeof(staged.path)) n = sizeof(staged.path) - 1;
         memcpy(staged.path, argv[0], n); staged.path[n] = 0;
     }
+    error = linux_memory_prepare(staged.plan.base);
+    if (error) return error;
+    /* Fork snapshots of the large window come with the first fork (linux_task.c):
+     * a program that runs alone (Python) needs only its arena. */
     active = 1; pending_entry = 0;
     linux_syscall_reset();
     linux_task_init();
@@ -127,13 +147,74 @@ int linux_run_image(const void *image, unsigned int size, int argc,
     linux_memory_leave();
     linux_idt_restore();
     active = 0;
+    release_large();   /* a shell program's memory goes back after it */
     if (fs_cd(previous_cwd)) return -5;
     return 0;
 }
 
+/* The exec buffer fits the program (GCC's cc1 is tens of MiB, most are small). */
+static int image_kept;
+static int image_buffer_fit(unsigned int bytes)
+{
+    if (image_buffer == fallback_image) { image_buffer = 0; image_capacity = 0; }
+    void *block = image_buffer;
+    int error = memory_kernel_fit(&block, &image_capacity, bytes);
+    image_buffer = block;
+    if (!image_buffer) { image_buffer = fallback_image; image_capacity = sizeof(fallback_image); }
+    return error;
+}
+static void image_buffer_release(void)
+{
+    if (image_kept || !image_buffer || image_buffer == fallback_image) return;
+    if (!memory_kernel_free(image_buffer, image_capacity)) { image_buffer = fallback_image; image_capacity = sizeof(fallback_image); }
+}
 static int read_image(const char *path)
 {
-    return fs_load_executable(path, image_buffer, sizeof(image_buffer));
+    if (!image_buffer) image_buffer_fit(sizeof(fallback_image));
+    int size = fs_load_executable(path, image_buffer, image_capacity);
+    if (size == -5) {
+        char full[256];
+        unsigned int n = strlen(path);
+        if (n >= sizeof(full)) return size;
+        memcpy(full, path, n + 1);
+        fs_executable_path(full, sizeof(full));
+        int bytes = fs_file_size(full);
+        if (bytes > (int)image_capacity && bytes <= (int)FS_MAX_EXECUTABLE_SIZE && !image_buffer_fit(bytes))
+            size = fs_load_executable(path, image_buffer, image_capacity);
+    }
+    return size;
+}
+/* Newest first: whatever is on top of kernel memory goes back. */
+static void release_large(void)
+{
+    for (int round = 0; round < 3; round++) {
+        image_buffer_release();
+        linux_task_release_large();
+        linux_memory_release();
+    }
+}
+/* Everything GCC needs (exec buffer, the large arena, fork snapshots),
+ * taken before a native program such as Happy Gouse gets the rest of RAM:
+ * its IDE and Prompt run the compiler later through ABI 13 run(). */
+int linux_toolchain_prepare(int with_processes)
+{
+    /* Python alone needs no exec buffer (no processes); GCC runs cc1 */
+    if (with_processes && (image_buffer_fit(FS_MAX_EXECUTABLE_SIZE) || image_buffer == fallback_image)) return -12;
+    if (linux_memory_prepare(LINUX_LARGE_BASE)) return -12;
+    linux_memory_keep(1);
+    if (!with_processes) return 0;
+    image_kept = 1;
+    linux_task_keep(1);
+    return linux_task_prepare_large();
+}
+/* Gives the reservation back (a full-screen program such as BJVM runs
+ * instead of Happy Gouse); Gouse takes it again when it starts. */
+void linux_toolchain_release(void)
+{
+    linux_task_keep(0);
+    linux_memory_keep(0);
+    image_kept = 0;
+    release_large();
 }
 int linux_run(const char *path, int argc, const char *const *argv, int *status)
 {
@@ -152,13 +233,8 @@ int linux_execve(unsigned int path, unsigned int argv, unsigned int envp)
         staged.path[i] = *(const char *)path;
         if (!staged.path[i]) break;
     }
-    int error = fs_exec_check(staged.path);
-    if (error) return error;
-    int size = read_image(staged.path);
-    if (size < 0) return size;
-    if (elf_validate(image_buffer, size, &staged.plan) || staged.plan.legacy) return -8;
     staged.used = 0;
-    error = stage_vector(argv, 0, &staged.argc);
+    int error = stage_vector(argv, 0, &staged.argc);
     if (error) return error;
     error = stage_vector(envp, VECTOR_MAX, &staged.envc);
     if (error) return error;
@@ -168,11 +244,32 @@ int linux_execve(unsigned int path, unsigned int argv, unsigned int envp)
         if (error) return error;
         staged.argc = 1;
     }
+    /* The executable staging allocation may have a physical address inside
+     * the old process's virtual window. Read it with the old mapping disabled. */
+    linux_memory_capture(&exec_previous_memory);
     linux_memory_leave();
+    fs_executable_path(staged.path, sizeof(staged.path));
+    error = fs_exec_check(staged.path);
+    if (error) goto restore_old_memory;
+    int size = read_image(staged.path);
+    if (size < 0) { error = size; goto restore_old_memory; }
+    if (elf_validate(image_buffer, size, &staged.plan) || staged.plan.legacy) {
+        error = -8;
+        goto restore_old_memory;
+    }
+    error = linux_memory_prepare(staged.plan.base);
+    if (error) goto restore_old_memory;
+    /* execve in a forked child: other processes are switched with it */
+    if (staged.plan.base == LINUX_LARGE_BASE && linux_task_count() > 1 && (error = linux_task_prepare_large()))
+        goto restore_old_memory;
     pending_stack = install_image(image_buffer);
     pending_entry = staged.plan.entry;
+    linux_tss_tls_set(0);
     linux_syscall_exec();
     return 0;
+restore_old_memory:
+    linux_memory_resume(&exec_previous_memory);
+    return error;
 }
 
 void linux_exec_apply(LinuxTrapFrame *frame)

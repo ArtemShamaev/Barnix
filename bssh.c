@@ -11,6 +11,7 @@
 #define MAX_CMD SHELL_LINE_MAX
 #include "permissions.h"
 #include "settings.h"
+#include "system_sound.h"
 
 _Static_assert(SHELL_STAGES_MAX + 1 <= LINUX_TASK_LIMIT, "pipeline runner needs a parent task slot");
 static char cmd[MAX_CMD];
@@ -49,11 +50,12 @@ static void do_login(void) {
         input(user,sizeof(user),"Login: ");
         secret_input(password,sizeof(password),"Password: ");
         if(!authenticate_user(user,password) && !switch_user(user,password))break;
-        println(RED,"Login failed. Try again.");
+        println(RED,"Login failed. Try again.");system_sound(SYSTEM_SOUND_ERROR);
     }
     memset(password,0,sizeof(password));memset(confirm,0,sizeof(confirm));
     input_history_clear();clear();settings_load();
     print(GREEN,"Welcome, ");println(GREEN,get_current_user());
+    system_sound(SYSTEM_SOUND_START);
 }
 extern const unsigned char bssh_runner_start[], bssh_runner_end[];
 
@@ -70,8 +72,9 @@ static void execute(int argc, const char *const *argv)
         return;
     }
     if(!strcmp(argv[0],"su")||!strcmp(argv[0],"sudo")||!strcmp(argv[0],"useradd")) {
-        char path[48];strcpy(path,"/bin/");strcat(path,argv[0]);
-        if(!check_permission(path,'x')){println(RED,"Permission denied");return;}
+        /* Commands live in /usr/bin (and /bin still names them): an ACL on either denies. */
+        char path[48];strcpy(path,"/usr/bin/");strcat(path,argv[0]);
+        if(!check_permission(path,'x')||!check_permission(path+4,'x')){println(RED,"Permission denied");return;}
     }
     if (!strcmp(argv[0],"su")) {
         if(argc>2 || session_depth==8){println(RED,"su [USER] (maximum 8 nested sessions)");return;}
@@ -79,7 +82,7 @@ static void execute(int argc, const char *const *argv)
         fs_getcwd(sessions[session_depth].cwd,sizeof(sessions[session_depth].cwd));
         char password[MAX_PASSWORD]="";
         if(!permissions_root())secret_input(password,sizeof(password),"Password: ");
-        if(switch_user(argc==2?argv[1]:"root",password))println(RED,"Authentication failed");
+        if(switch_user(argc==2?argv[1]:"root",password)){println(RED,"Authentication failed");system_sound(SYSTEM_SOUND_ERROR);}
         else {session_depth++;input_history_clear();clear();settings_load();}
         memset(password,0,sizeof(password));return;
     }
@@ -90,7 +93,7 @@ static void execute(int argc, const char *const *argv)
         strcpy(previous,get_current_user());fs_getcwd(cwd,sizeof(cwd));
         if(!permissions_root()) {
             secret_input(password,sizeof(password),"[sudo] root password: ");
-            if(authenticate_user("root",password)){memset(password,0,sizeof(password));println(RED,"Authentication failed");return;}
+            if(authenticate_user("root",password)){memset(password,0,sizeof(password));println(RED,"Authentication failed");system_sound(SYSTEM_SOUND_ERROR);return;}
         }
         memset(password,0,sizeof(password));permissions_restore("root");
         execute(argc-1,argv+1);
@@ -112,6 +115,15 @@ static void execute(int argc, const char *const *argv)
         } else {session_depth=0;input_history_clear();clear();permissions_restore("root");do_login();}
         return;
     }
+    if (!strcmp(argv[0], "sounds")) {
+        if (argc == 2 && (!strcmp(argv[1], "on") || !strcmp(argv[1], "off"))) {
+            char path[96]; user_config_path("sounds.cfg", path);
+            if (fs_write(path, argv[1], strlen(argv[1]))) println(RED, "Cannot save user settings");
+            system_sound_enable(argv[1][1] == 'n');
+        } else if (argc != 1) { println(RED, "usage: sounds [on|off]"); return; }
+        println(WHITE, system_sound_enabled() ? "Shell sounds are on" : "Shell sounds are off");
+        return;
+    }
     if (!strcmp(argv[0], "linux")) {
         if (argc < 2) { println(RED, "usage: linux /path/program [args]"); return; }
         int status;
@@ -122,10 +134,14 @@ static void execute(int argc, const char *const *argv)
         println(WHITE, "");
         return;
     }
-    char path[MAX_CMD + 5];
+    char path[MAX_CMD + 10];
     const char *name = argv[0];
     if (!strchr(name, '/')) {
-        strcpy(path, "/bin/"); strcat(path, name); name = path;
+        strcpy(path, "/usr/bin/"); strcat(path, name); name = path;
+        if (fs_size(path) < 0) {
+            strcpy(path, "/bin/"); strcat(path, argv[0]);
+            if (fs_size(path) < 0) { strcpy(path, "/usr/bin/"); strcat(path, argv[0]); }
+        }
     }
     int status;
     if (elf_run(name, argc, (const char *const *)argv, &status) == 0) {
@@ -136,7 +152,7 @@ static void execute(int argc, const char *const *argv)
 
 static void exec_cmd(void) {
     const char *error=shell_parse(cmd,&plan);
-    if(error){print(RED,"bssh: ");println(RED,error);return;}
+    if(error){print(RED,"bssh: ");println(RED,error);system_sound(SYSTEM_SOUND_ERROR);return;}
     if(plan.count)execute(plan.commands[0].argc,plan.commands[0].argv);
 }
 

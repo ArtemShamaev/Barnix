@@ -31,6 +31,7 @@ elf_enter:
 .size elf_enter, . - elf_enter
 .section .bss
 .align 4
+.global saved_kernel_stack
 saved_kernel_stack:
     .long 0
 .section .note.GNU-stack,"",@progbits

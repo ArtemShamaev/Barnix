@@ -46,11 +46,25 @@ int file_probe(unsigned int *initial)
         off += reclen;
     }
     CHECK(found_dot);
+    unsigned int stat[24] = {0}, opened_stat[24] = {0};
+    CHECK(CALL(195, ".", stat, 0) == 0);
+    CHECK((stat[4] & 0170000) == 0040000);
+    CHECK(CALL(197, directory, opened_stat, 0) == 0);
+    CHECK(opened_stat[3] == stat[3] && opened_stat[22] == stat[22]);
+    CHECK(CALL(196, ".", opened_stat, 0) == 0);
+    CHECK(opened_stat[22] == stat[22]);
+    CHECK(CALL(195, "missing-stat-probe", stat, 0) == -2);
+    CHECK(CALL(197, 99, stat, 0) == -9);
     CHECK(CALL(6, directory, 0, 0) == 0);
     const char *name = "linux-probe.dat";
     int fd = CALL(5, name, 2 | 64 | 512, 0600);
     CHECK(fd >= 0);
     CHECK(CALL(4, fd, "abc", 3) == 3);
+    CHECK(CALL(195, name, stat, 0) == 0);
+    CHECK((stat[4] & 0170000) == 0100000);
+    CHECK(stat[11] == 3 && stat[12] == 0);
+    CHECK(CALL(197, fd, opened_stat, 0) == 0);
+    CHECK(stat[22] == opened_stat[22] && opened_stat[11] == 3);
     CHECK(CALL(19, fd, 0, 0) == 0);
     int copy = CALL(41, fd, 0, 0);
     CHECK(copy >= 0 && copy != fd);
@@ -74,8 +88,10 @@ int file_probe(unsigned int *initial)
     CHECK(CALL(3, fd, 0, 1) == -14);
     CHECK(CALL(6, fd, 0, 0) == 0);
     CHECK(CALL(6, fd, 0, 0) == -9);
-    fd = CALL(5, name, 0, 0);
+    fd = CALL(5, name, 32768, 0); /* O_LARGEFILE, common in GCC's file I/O. */
     CHECK(fd >= 0);
+    int flags = CALL(55, fd, 3, 0); /* F_GETFL followed by F_SETFL. */
+    CHECK(flags >= 0 && CALL(55, fd, 4, flags) == 0);
     CHECK(CALL(4, fd, "x", 1) == -9);
     CHECK(CALL(6, fd, 0, 0) == 0);
     fd = CALL(5, name, 1 | 1024, 0);
@@ -101,5 +117,22 @@ int file_probe(unsigned int *initial)
     CHECK(CALL(3, 0, buffer, 8) == 8 && buffer[0] == 'r');
     CHECK(CALL(6, 0, 0, 0) == 0);
     CHECK(CALL(12, "/bin", 0, 0) == 0);
+    if ((unsigned int)_start >= 0x80000000U) {
+        unsigned int base = (unsigned int)CALL(45, 0, 0, 0);
+        CHECK((unsigned int)CALL(45, base + 8 * 1024 * 1024, 0, 0) ==
+              base + 8 * 1024 * 1024);
+        volatile unsigned int *marker = (volatile unsigned int *)(base + 6 * 1024 * 1024);
+        *marker = 0x1234abcd;
+        int child = CALL(2, 0, 0, 0);
+        CHECK(child >= 0);
+        if (!child) {
+            *marker = 0xdeadbeef;
+            CALL(1, 0, 0, 0);
+            for (;;) {}
+        }
+        int status = -1;
+        CHECK(CALL(7, child, &status, 0) == child && status == 0);
+        CHECK(*marker == 0x1234abcd);
+    }
     return 0;
 }

@@ -24,19 +24,31 @@ static int run_command(const ShellCommand *command)
     if (explicit_linux && command->argc < 2) return error(0, "usage: linux /path/program [args]", 2);
     if (explicit_linux) args++;
     const char *name = args[0], *path = name;
-    char resolved[SHELL_LINE_MAX + 5];
+    char resolved[SHELL_LINE_MAX + 9];
     int slash = 0;
     for (unsigned int i = 0; name[i]; i++) if (name[i] == '/') slash = 1;
-    if (!slash && !explicit_linux) {
-        const char prefix[] = "/bin/";
-        unsigned int i = 0;
-        for (; i < 5; i++) resolved[i] = prefix[i];
-        for (unsigned int j = 0;; j++, i++) { resolved[i] = name[j]; if (!name[j]) break; }
-        path = resolved;
+    /* Commands live in /usr/bin; /bin is searched second. */
+    static const char *const prefixes[] = {"/usr/bin/", "/bin/"};
+    int fd = -2;
+    for (unsigned int p = 0; p < (!slash && !explicit_linux ? 2U : 1U); p++) {
+        if (!slash && !explicit_linux) {
+            unsigned int i = 0;
+            for (; prefixes[p][i]; i++) resolved[i] = prefixes[p][i];
+            for (unsigned int j = 0;; j++, i++) { resolved[i] = name[j]; if (!name[j]) break; }
+            path = resolved;
+        }
+        /* Linux itself may accept standalone-tagged ELF. Never enter a Barnix
+         * function-pointer program from this Linux-only runner, including on Linux. */
+        fd = CALL(open, path, 0, 0);
+        if (fd >= 0 || fd == -13) break;
     }
-    /* Linux itself may accept standalone-tagged ELF. Never enter a Barnix
-     * function-pointer program from this Linux-only runner, including on Linux. */
-    int fd = CALL(open, path, 0, 0);
+    /* An absolute /bin/NAME that is missing names /usr/bin/NAME (see execve). */
+    if (fd == -2 && path == name && path[0] == '/' && path[1] == 'b' && path[2] == 'i' && path[3] == 'n' && path[4] == '/') {
+        unsigned int i = 0;
+        for (; i < 4; i++) resolved[i] = "/usr"[i];
+        for (unsigned int j = 0; i < sizeof(resolved); j++, i++) { resolved[i] = path[j]; if (!path[j]) break; }
+        if (i < sizeof(resolved)) { int merged = CALL(open, resolved, 0, 0); if (merged >= 0 || merged == -13) { fd = merged; path = resolved; } }
+    }
     int lookup_error = fd < 0 && fd != -13 ? fd : 0;
     unsigned char ident[16];
     int got = 0;
