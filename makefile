@@ -852,3 +852,32 @@ test-bulk-fs:
 	./tests/bulk_fs_test tests/bulk_fs_test.img
 	e2fsck -fn tests/bulk_fs_test.img
 	rm -f tests/bulk_fs_test.img
+
+# =========================
+# x86_64 port (branch x86_64), stage 0: long-mode boot on BIOS and UEFI
+# =========================
+CFLAGS64 = -O2 -m64 -mcmodel=small -mno-red-zone -mgeneral-regs-only -ffreestanding -nostdlib -fno-pie -fno-pic -fno-stack-protector -U_FORTIFY_SOURCE -fno-asynchronous-unwind-tables -Wall -Wextra $(WERROR) $(INCLUDES) -MMD -MP
+LDFLAGS64 = -m elf_x86_64 -z max-page-size=0x1000 -T kernel/arch/x86_64/linker.ld
+OBJS64 = build/x86_64/boot.o build/x86_64/stage0.o
+
+build/x86_64/%.o: kernel/arch/x86_64/%.S makefile
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS64) -c $< -o $@
+build/x86_64/%.o: kernel/arch/x86_64/%.c makefile
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS64) -c $< -o $@
+kernel64.elf: $(OBJS64) kernel/arch/x86_64/linker.ld
+	$(LD) $(LDFLAGS64) -o $@ $(OBJS64)
+-include $(OBJS64:.o=.d)
+
+barnix64.iso: kernel64.elf
+	mkdir -p build/iso64/boot/grub
+	cp kernel64.elf build/iso64/boot/
+	printf 'set timeout=0\nmenuentry "Barnix x86_64" {\n    multiboot /boot/kernel64.elf\n    boot\n}\n' > build/iso64/boot/grub/grub.cfg
+	grub-mkrescue -o $@ build/iso64 -- -volid BARNIX64 2>/dev/null
+
+.PHONY: test-x86_64 run64
+test-x86_64: barnix64.iso
+	python3 tests/x86_64_boot_test.py
+run64: barnix64.iso
+	qemu-system-x86_64 -m 2048M -cdrom barnix64.iso
