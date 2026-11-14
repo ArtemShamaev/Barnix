@@ -6,13 +6,16 @@ static char current_user[MAX_USERNAME] = "root";
 static int permission_internal;
 const char *get_current_user(void) { return current_user; }
 int permissions_root(void) { return !strcmp(current_user, "root"); }
-void permissions_restore(const char *user) { strcpy(current_user, user); }
 static int valid_user(const char *s) {
+    if (!s) return 0;
     int n = strlen(s);
     if (!n || n >= MAX_USERNAME || n > MAX_NAME) return 0;
     for (int i = 0; i < n; i++)
         if (!(s[i] >= 'a' && s[i] <= 'z') && !(s[i] >= '0' && s[i] <= '9') && s[i] != '_' && s[i] != '-') return 0;
     return 1;
+}
+void permissions_restore(const char *user) {
+    if (valid_user(user)) strcpy(current_user, user);
 }
 static int private_read(const char *path, char *out, int cap) {
     permission_internal++;
@@ -91,11 +94,24 @@ int check_permission(const char *name, char mode) {
     char path[PATH_CAP], home[64];
     namespace_start();
     if (normalize(name, path)) return 0;
+    /* Public certificates for HTTPS are readable by everyone. */
+    if (beneath(path, "/etc/ssl")) return mode == 'r' || mode == 'x';
+    /* So is the brm package database (which programs are installed). */
+    if (beneath(path, "/etc/brm")) return mode == 'r' || mode == 'x';
     /* Credentials and ACL metadata cannot be delegated. */
     if (beneath(path, "/etc")) return 0;
     strcpy(home, "/home/"); strcat(home, current_user);
-    int allowed = beneath(path, home) || (mode == 'x' && beneath(path, "/bin"));
-    if (mode == 'x' && (!strcmp(path, "/") || !strcmp(path, "/home"))) allowed = 1;
+    int allowed = beneath(path, home) || (mode == 'x' && (beneath(path, "/usr/bin") || beneath(path, "/bin")));
+    if (mode == 'x' && (!strcmp(path, "/") || !strcmp(path, "/home") || !strcmp(path, "/usr"))) allowed = 1;
+    /* Files of installed packages besides the commands (GCC's headers,
+     * libraries and cc1, Gouse data and manuals) are for everyone to read
+     * and run, as on Unix; /tmp is everyone's scratch folder (GCC's). */
+    if ((mode == 'r' || mode == 'x') &&
+        (beneath(path, "/usr/include") || beneath(path, "/usr/lib") || beneath(path, "/usr/libexec") ||
+         beneath(path, "/usr/share") || beneath(path, "/usr/local"))) allowed = 1;
+    if (beneath(path, "/tmp")) allowed = 1;
+    /* /mc is the shared game folder (Alpha Launcher): jars, worlds, options. */
+    if (beneath(path, "/mc")) allowed = 1;
     char data[8192];
     int acl_size=private_read("/etc/access.cfg", data, sizeof(data));
     if(acl_size<0) { permission_internal++;int exists=fs_size("/etc/access.cfg")>=0;permission_internal--;if(exists)return 0; }
@@ -128,7 +144,13 @@ int set_file_permissions(const char *name, const char *spec, const char *passwor
     for (const char *p = equal + 1; *p; p++) if (!strchr("rwx", *p)) return -1;
     if (strlen(equal + 1) > 3) return -1;
     int n = private_read("/etc/access.cfg", data, sizeof(data));
-    if (n < 0) { n = 0; data[0] = 0; }
+    if (n < 0) {
+        permission_internal++;
+        int exists = fs_size("/etc/access.cfg") >= 0;
+        permission_internal--;
+        if (exists) return -1;
+        n = 0; data[0] = 0;
+    }
     char lock[96] = "", encoded[96] = "";
     int lock_depth=-1;
     /* The most recent lock belongs to the file, not a particular ACL user. */
@@ -189,7 +211,20 @@ int set_file_permissions(const char *name, const char *spec, const char *passwor
 }
 /* Executable contents are available to the loaders under x permission without
  * making an execute-only program readable through ordinary file APIs. */
-int fs_load_executable(const char *path, void *buffer, unsigned int capacity) {
+/* Commands moved from /bin to /usr/bin: an absolute /bin/NAME that does not
+ * exist names /usr/bin/NAME, so old shortcuts, scripts and execve() still work. */
+void fs_executable_path(char *path, unsigned int capacity) {
+    if (strncmp(path, "/bin/", 5) || (unsigned int)strlen(path) + 5 > capacity) return;
+    permission_internal++; int missing = fs_size(path) < 0; permission_internal--;
+    if (!missing) return;
+    memmove(path + 4, path, strlen(path) + 1);
+    memcpy(path, "/usr", 4);
+}
+int fs_load_executable(const char *name, void *buffer, unsigned int capacity) {
+    char path[PATH_CAP];
+    if ((unsigned int)strlen(name) >= sizeof(path)) return -36;
+    strcpy(path, name);
+    fs_executable_path(path, sizeof(path));
     if (!check_permission(path, 'x')) return -13;
     permission_internal++;
     int result = fs_exec_check(path);
@@ -204,18 +239,8 @@ int fs_file_size(const char *path) {
 }
 int fs_pwrite(const char *path,unsigned int position,const void *bytes,unsigned int count,int append) {
     if(!check_permission(path,'w'))return -13;
-    static char buffer[FS_MAX_FILE_SIZE];
     permission_internal++;
-    int size=fs_size(path),result=-5;
-    if(size<0)goto done;
-    if(append)position=size;
-    if(position>sizeof(buffer)||count>sizeof(buffer)-position){result=-27;goto done;}
-    unsigned int next=position+count;if(next<(unsigned int)size)next=size;
-    memset(buffer,0,next);
-    if(fs_read(path,0,buffer,size)!=size)goto done;
-    memcpy(buffer+position,bytes,count);
-    result=fs_write(path,buffer,next)?-5:(int)(position+count);
-done:
+    int result=fs_write_at(path,position,bytes,count,append);
     permission_internal--;return result;
 }
 /* Stage guarded ACLs for both names before a rename, then remove the old

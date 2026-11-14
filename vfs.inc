@@ -1,7 +1,7 @@
 /* Namespace routing over the ext2 engine. Only one image is cached: switching
  * volumes reloads it, while every mutation is already committed by ext2. */
 #define MOUNT_COUNT 8
-#define PATH_CAP 256
+#define PATH_CAP 512
 static struct { int used; DiskSelection disk; char path[PATH_CAP]; } mounts[MOUNT_COUNT];
 static char working[PATH_CAP] = "/";
 static int namespace_active, active_volume = -1;
@@ -99,11 +99,36 @@ int fs_##fn(const char *name) { \
     if (!namespace_active) return ext_##fn(name); \
     char local[PATH_CAP]; if (route(name, local, parent) < 0) return -1; \
     return ext_##fn(local); }
-PATH_WRAPPER(size, 0, 'r')
+/* The size of a program one may run (x) is no secret: shells and Gouse
+ * Prompt look commands up by it, though the bytes stay unreadable. */
+int fs_size(const char *name) {
+    if (!check_permission(name, 'r') && !check_permission(name, 'x')) return -13;
+    if (!namespace_active) return ext_size(name);
+    char local[PATH_CAP]; if (route(name, local, 0) < 0) return -1;
+    return ext_size(local);
+}
 PATH_WRAPPER(exec_check, 0, 'x')
 PATH_WRAPPER(stat, 0, 'r')
+int fs_file_info(const char *name, FsFileInfo *info) {
+    if (!info || (!check_permission(name, 'r') && !check_permission(name, 'w') &&
+                  !check_permission(name, 'x'))) return -13;
+    if (!namespace_active) return ext_file_info(name, info);
+    char local[PATH_CAP]; if (route(name, local, 0) < 0) return -1;
+    return ext_file_info(local, info);
+}
+int fs_chmod(const char *name, unsigned int mode) {
+    if (!check_permission(name, 'w')) return -13;
+    if (!namespace_active) return ext_chmod(name, mode);
+    char local[PATH_CAP]; if (route(name, local, 0) < 0) return -1;
+    return ext_chmod(local, mode);
+}
 PATH_WRAPPER(touch, 1, 'w')
-PATH_WRAPPER(mkdir, 1, 'w')
+int fs_mkdir(const char *name) {
+    if (!check_permission(name, 'w')) return -13;
+    namespace_start();
+    char local[PATH_CAP]; if (route(name, local, 1) < 0) return -1;
+    return ext_mkdir(local);
+}
 int fs_is_dir(const char *name) {
     if (!check_permission(name, 'x')) return 0;
     if (!namespace_active) return ext_is_dir(name);
@@ -126,6 +151,12 @@ int fs_read(const char *name, unsigned int offset, void *buffer, unsigned int si
     if (!namespace_active) return ext_read(name, offset, buffer, size);
     char local[PATH_CAP]; if (route(name, local, 0) < 0) return -1;
     return ext_read(local, offset, buffer, size);
+}
+int fs_write_at(const char *name, unsigned int offset, const void *data,
+                unsigned int size, int append) {
+    if (!namespace_active) return ext_pwrite(name, offset, data, size, append);
+    char local[PATH_CAP]; if (route(name, local, 1) < 0) return -1;
+    return ext_pwrite(local, offset, data, size, append);
 }
 int fs_getdents(const char *name, void *buffer, unsigned int capacity, unsigned int *position) {
     if (!check_permission(name, 'r')) return -13;
@@ -159,6 +190,12 @@ void fs_ls(void) {
     if (!namespace_active) { ext_ls(); return; }
     char local[PATH_CAP]; if (route(working, local, 0) >= 0 && !ext_cd(local)) ext_ls();
 }
+/* Free room of the filesystem that holds path (ABI 14 disk_space). */
+int fs_space(const char *path, unsigned int *free_kib, unsigned int *free_files) {
+    if (!namespace_active) return ext_space(free_kib, free_files);
+    char local[PATH_CAP]; if (route(path && *path ? path : working, local, 0) < 0) return -1;
+    return ext_space(free_kib, free_files);
+}
 void fs_df(void) {
     if (!namespace_active) { ext_df(); return; }
     char local[PATH_CAP]; if (route(working, local, 0) >= 0) ext_df();
@@ -171,9 +208,10 @@ void fs_cat(const char *name) {
 int fs_cp(const char *source, const char *dest) {
     if (!check_permission(source, 'r') || !check_permission(dest, 'w')) return -13;
     if (!namespace_active) return ext_cp(source, dest);
-    static char buffer[MAX_FILE];
+    char *buffer = file_scratch;
     int size = fs_size(source);
-    if (size < 0 || fs_size(dest) >= 0 || fs_is_dir(dest) || fs_read(source, 0, buffer, size) != size) return -1;
+    if (size < 0 || (unsigned int)size > scratch_capacity || fs_size(dest) >= 0 ||
+        fs_is_dir(dest) || fs_read(source, 0, buffer, size) != size) return -1;
     return fs_write(dest, buffer, size);
 }
 int fs_mv(const char *source, const char *dest) {

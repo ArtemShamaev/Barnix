@@ -124,8 +124,11 @@ static unsigned char latin_row(unsigned int code, unsigned int row)
     case '\\': { static const unsigned char r[7] = {64, 32, 32, 16, 8, 8, 4}; return r[row]; }
     case '(': return row < 2 ? 4 : row < 5 ? 8 : 4;
     case ')': return row < 2 ? 8 : row < 5 ? 4 : 8;
-    case '[': return 28 | (row == 0 || row == 6 ? 3 : 0);
-    case ']': return 28 | (row == 0 || row == 6 ? 24 : 0);
+    case '[': return row == 0 || row == 6 ? 56 : 32;
+    case ']': return row == 0 || row == 6 ? 56 : 8;
+    case '{': return row == 0 || row == 6 ? 24 : row == 3 ? 32 : 16;
+    case '}': return row == 0 || row == 6 ? 48 : row == 3 ? 8 : 16;
+    case '`': return row == 0 ? 16 : row == 1 ? 8 : 0;
     case '+': return row == 3 ? 28 : row == 2 || row == 4 ? 4 : 0;
     case '=': return row == 2 || row == 4 ? 28 : 0;
     case '!': return row < 5 ? 4 : row == 6 ? 4 : 0;

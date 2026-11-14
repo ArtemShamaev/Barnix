@@ -7,11 +7,17 @@
 #include "disk.h"
 #include "multiboot.h"
 #include "console_video.h"
+#include "video_rgb.h"
+#include "memory.h"
+#include "smp.h"
+#include "audio.h"
 #include "storage_pci.h"
+#include "linux_limits.h"
 #include "net.h"
 #include "linux_idt.h"
 #include "linux_tss.h"
 #include "linux_exec.h"
+#include "usb_time.h"
 #ifdef BARNIX_SETUP
 #include "Setup/setup.h"
 #endif
@@ -28,6 +34,88 @@ const unsigned int multiboot_header[] = {
 };
 void bssh_main(void);
 
+/* The boot screen uses the text console on VGA and framebuffer machines. */
+static unsigned int boot_step;
+static const char *boot_services[10];
+static unsigned int boot_service_count;
+static void boot_fill(int x, int y, int width, unsigned char color, char ch)
+{
+    for (int i = 0; i < width; i++)
+        console_cells[y * 80 + x + i] = ((unsigned short)color << 8) | (unsigned char)ch;
+}
+static void boot_label(int x, int y, unsigned char color, const char *message)
+{
+    while (*message && x < 80 && y < 25)
+        console_cells[y * 80 + x++] = ((unsigned short)color << 8) | (unsigned char)*message++;
+}
+static void boot_draw(const char *service)
+{
+#ifdef BARNIX_EFI
+    const unsigned int stages = 8;
+#else
+    const unsigned int stages = 7;
+#endif
+    unsigned int percent = boot_service_count * 100 / stages;
+    char number[5] = {0};
+    number[0] = '0' + percent / 100;
+    number[1] = '0' + (percent / 10) % 10;
+    number[2] = '0' + percent % 10;
+    number[3] = '%';
+    for (int y = 0; y < 25; y++) boot_fill(0, y, 80, 0x10, ' ');
+    boot_fill(0, 0, 80, 0x30, ' ');
+    boot_label(4, 0, 0x3f, "BARNIX");
+    boot_label(64, 0, 0x3b, "SYSTEM START");
+    boot_label(11, 4, 0x0b, "[ B ]");
+    boot_label(19, 4, 0x0f, "BARNIX OS");
+    boot_label(19, 5, 0x08, "Initializing your workspace");
+    boot_fill(11, 7, 58, 0x18, ' ');
+    boot_label(13, 7, 0x1f, "STARTUP SEQUENCE");
+    boot_label(60, 7, 0x1b, "STATUS");
+    /* Keep the current stage visible when the log grows beyond the panel. */
+    unsigned int first = boot_service_count > 5 ? boot_service_count - 5 : 0;
+    int row = 9;
+    for (unsigned int i = first; i < boot_service_count; i++, row++) {
+        boot_label(13, row, 0x0a, "[OK]");
+        boot_label(20, row, 0x07, boot_services[i]);
+    }
+    if (service) {
+        boot_label(13, row, 0x0b, boot_step & 1 ? "[>>]" : "[ >]");
+        boot_label(20, row, 0x0f, service);
+    } else if (percent == 100) {
+        boot_label(13, row, 0x0a, "[OK]");
+        boot_label(20, row, 0x0f, "Ready");
+    }
+    boot_fill(11, 17, 58, 0x18, ' ');
+    boot_label(13, 17, 0x1f, percent == 100 ? "READY" : "LOADING");
+    boot_label(62, 17, 0x1f, number);
+    boot_fill(13, 19, 54, 0x08, '-');
+    boot_fill(13, 19, (int)(54 * percent / 100), 0x0b, '=');
+    if (service && percent < 100) boot_label(13 + (int)(54 * percent / 100), 19, 0x0f, ">");
+    boot_label(11, 22, 0x08, "Barnix is preparing devices and services");
+    boot_label(11, 23, 0x08, "Starting the Barnix command environment");
+    console_present();
+    boot_step++;
+}
+#ifdef BARNIX_EFI
+static void boot_pci_progress(unsigned int bus)
+{
+    (void)bus;
+    boot_draw("PCI resource scan");
+}
+#endif
+static void boot_animate(const char *service, unsigned int frames)
+{
+    for (unsigned int frame = 0; frame < frames; frame++) {
+        boot_draw(service);
+        usb_delay_ms(35);
+    }
+}
+static void boot_complete(const char *service)
+{
+    if (boot_service_count < 10) boot_services[boot_service_count++] = service;
+    boot_draw(0);
+}
+
 
 static int prepare_live(const MultibootInfo *info)
 {
@@ -35,7 +123,7 @@ static int prepare_live(const MultibootInfo *info)
         return -1;
     const MultibootModule *module = (const MultibootModule *)info->modules;
     if (module->end <= module->start ||
-        disk_init_from_memory((const void *)module->start, module->end - module->start))
+        disk_init_from_memory((void *)module->start, module->end - module->start))
         return -1;
     return 0;
 }
@@ -74,11 +162,37 @@ static int select_boot_uuid(const char *text)
 
 void kernel_main(unsigned int magic, const MultibootInfo *info)
 {
+    if (magic == MULTIBOOT_BOOT_MAGIC) memory_init(info);
 #ifdef BARNIX_EFI
-    if (magic == MULTIBOOT_BOOT_MAGIC) storage_pci_boot_memory(info);
+    /* A framebuffer above 4 GiB (Intel laptops) is moved below it first. */
+    static MultibootInfo lowered;
+    if (magic == MULTIBOOT_BOOT_MAGIC && info && (info->flags & (1U << 12))) {
+        int force = (info->flags & MULTIBOOT_CMDLINE) && info->command_line &&
+                    strstr((const char *)info->command_line, "fbmove");
+        uint64_t fb = info->framebuffer_low | ((uint64_t)info->framebuffer_high << 32);
+        int in_window = fb < LINUX_LARGE_BASE + (uint64_t)LINUX_LARGE_ARENA_SIZE &&
+                        fb + (uint64_t)info->framebuffer_pitch * info->framebuffer_height > LINUX_LARGE_BASE;
+        if (info->framebuffer_high || force || in_window) {
+            storage_pci_boot_memory(info, 0);
+            uint64_t moved = storage_pci_lower_framebuffer(info->framebuffer_low | ((uint64_t)info->framebuffer_high << 32), force);
+            if (moved) { lowered = *info; lowered.framebuffer_low = (uint32_t)moved; lowered.framebuffer_high = 0; info = &lowered; }
+        }
+    }
 #endif
     if (magic == MULTIBOOT_BOOT_MAGIC) console_video_init(info);
     if (!console_graphics()) console_font_init();
+#ifndef BARNIX_EFI
+    if (!console_graphics()) video_legacy_init();
+#endif
+    boot_animate("Preparing hardware", 4);
+#ifdef BARNIX_EFI
+    if (magic == MULTIBOOT_BOOT_MAGIC)
+    {
+        storage_pci_boot_memory(info, boot_pci_progress);
+        storage_pci_clear_large_window();
+    }
+    boot_complete("PCI resource map");
+#endif
 #ifdef BARNIX_LINUX_SELFTEST
     if (magic == MULTIBOOT_BOOT_MAGIC && info &&
         (info->flags & MULTIBOOT_CMDLINE) && info->command_line &&
@@ -86,15 +200,24 @@ void kernel_main(unsigned int magic, const MultibootInfo *info)
     {
         if (prepare_live(info) || disk_select("ram0") || fs_init())
             panic("Linux selftest requires a compatible ext2 module");
-        linux_abi_selftest();
+        linux_abi_selftest(strstr((const char *)info->command_line, "linux-bigfile") != NULL,
+                           strstr((const char *)info->command_line, "linux-gcc") != NULL,
+                           strstr((const char *)info->command_line, "linux-compile") != NULL,
+                           strstr((const char *)info->command_line, "linux-libc") != NULL,
+                           strstr((const char *)info->command_line, "linux-stdlib-compile") != NULL);
     }
 #endif
     /* Linux task CPU state is installed only while linux_run is active. */
-    mouse_init();
-    net_init();
-    clear();
-
-    println(CYAN, tr("Barnix OS starting..."));
+    boot_animate("Video console", 6);
+    boot_complete("Video console");
+    boot_animate("Input devices", 2);
+    mouse_init(); boot_complete("Input devices");
+    boot_animate("Processor cores", 2);
+    smp_init(); boot_complete("Processor cores");
+    boot_animate("Audio subsystem", 2);
+    audio_init(); boot_complete("Audio subsystem");
+    boot_animate("Network adapters", 2);
+    net_init(); boot_complete("Network adapters");
 
     if (magic != MULTIBOOT_BOOT_MAGIC || !info)
         panic(tr("Multiboot boot information missing"));
@@ -104,8 +227,10 @@ void kernel_main(unsigned int magic, const MultibootInfo *info)
     #ifdef BARNIX_SETUP
     live_only = 1;
     #endif
+    boot_animate("Live filesystem", 2);
     int have_live = prepare_live(info) == 0;
     if (have_live && !disk_select("ram0") && !fs_init()) elf_cache_recovery();
+    boot_complete("Live filesystem");
     const char *root_uuid = NULL;
     if ((info->flags & MULTIBOOT_CMDLINE) && info->command_line)
         root_uuid = strstr((const char *)info->command_line, "root_uuid=");
@@ -119,13 +244,14 @@ void kernel_main(unsigned int magic, const MultibootInfo *info)
     }
 
     if (!have_live) elf_cache_recovery();
+    boot_animate("System services", 2);
     system_init();
-    println(GREEN, tr("fs ready"));
+    boot_complete("System services");
 
     #ifdef BARNIX_SETUP
     setup_run(info);
-    clear();
     #endif
+    clear();
     println(YELLOW, tr("starting shell..."));
 
     bssh_main();

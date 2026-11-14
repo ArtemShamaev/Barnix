@@ -14,10 +14,13 @@ typedef struct { int x,y; unsigned int buttons,sequence; int available; } Barnix
 /* ABI 8 snapshot. Wheel counters are cumulative, not consumed by readers. */
 typedef struct { BarnixMouse mouse; int wheel, horizontal; } BarnixPointer;
 void mouse_pointer(BarnixPointer *state);
+/* ABI 10: unclamped movement since the previous call, then reset. */
+void mouse_motion(int *dx, int *dy);
 int mouse_source(unsigned int source, int connected, int dx, int dy,
                  unsigned int buttons, int wheel, int horizontal);
 int mouse_usb_report(const unsigned char *report, unsigned int length);
 int mouse_relative(int dx,int dy,unsigned int buttons);
+void mouse_ps2_set_id(unsigned char id);
 void mouse_init(void);
 void mouse_reset(void);
 int mouse_feed(unsigned char byte);

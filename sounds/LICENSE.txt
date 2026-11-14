@@ -1,0 +1,8 @@
+Sound effects (all files here except sys_start.wav) come from the Kenney
+sound packs Impact Sounds, Interface Sounds, Digital Audio and Sci-Fi Sounds,
+created and distributed by Kenney (www.kenney.nl) under Creative Commons Zero
+(CC0, http://creativecommons.org/publicdomain/zero/1.0/): free to use in
+personal, educational and commercial projects. Thanks, Kenney!
+
+They were trimmed and converted to 22050 Hz mono by scripts/import_sounds.py;
+sys_start.wav, the Barnix start chime, is synthesized by the same script.

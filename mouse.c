@@ -3,17 +3,23 @@
 static BarnixMouse ps2_mouse_state={320,200,0,0,0};
 static unsigned char source_present[96];
 static unsigned int source_buttons[96];
-static int wheel_total,horizontal_total;
-static unsigned char packet[3];
-static int packet_index;
-void mouse_reset(void) {ps2_mouse_state=(BarnixMouse){320,200,0,0,0};packet_index=0;wheel_total=horizontal_total=0;for(int i=0;i<96;i++){source_present[i]=0;source_buttons[i]=0;}}
+static int wheel_total,horizontal_total,motion_x,motion_y;
+static unsigned char packet[4];
+static unsigned int packet_index;
+static unsigned char ps2_id;
+static unsigned int ps2_packet_size=3;
+void mouse_reset(void) {ps2_mouse_state=(BarnixMouse){320,200,0,0,0};packet_index=0;ps2_id=0;ps2_packet_size=3;wheel_total=horizontal_total=motion_x=motion_y=0;for(int i=0;i<96;i++){source_present[i]=0;source_buttons[i]=0;}}
 void mouse_get(BarnixMouse *out) {if(out)*out=ps2_mouse_state;}
+void mouse_ps2_set_id(unsigned char id) {ps2_id=id;ps2_packet_size=(id==3||id==4)?4:3;packet_index=0;}
 int mouse_feed(unsigned char byte) {
     if(!packet_index && !(byte&8))return 0;
-    packet[packet_index++]=byte;if(packet_index<3)return 0;packet_index=0;
+    packet[packet_index++]=byte;if(packet_index<ps2_packet_size)return 0;packet_index=0;
     int dx=packet[1]-((packet[0]&16)?256:0),dy=packet[2]-((packet[0]&32)?256:0);
     if(packet[0]&0xc0)dx=dy=0;
-    return mouse_relative(dx,-dy,packet[0]&7);
+    unsigned int buttons=packet[0]&7;int wheel=0;
+    if(ps2_packet_size==4){wheel=packet[3]&15;if(wheel&8)wheel-=16;
+        if(ps2_id==4){if(packet[3]&16)buttons|=BARNIX_MOUSE_BACK;if(packet[3]&32)buttons|=BARNIX_MOUSE_FORWARD;}}
+    return mouse_source(0,1,dx,-dy,buttons,wheel,0);
 }
 /* HID boot protocol has no report ID; ignore optional trailing bytes. */
 int mouse_usb_report(const unsigned char *report,unsigned int length) {
@@ -21,6 +27,11 @@ int mouse_usb_report(const unsigned char *report,unsigned int length) {
     int dx=report[1]-(report[1]&128?256:0);
     int dy=report[2]-(report[2]&128?256:0);
     return mouse_relative(dx,dy,report[0]);
+}
+void mouse_motion(int *dx,int *dy) {
+    if(dx)*dx=motion_x;
+    if(dy)*dy=motion_y;
+    motion_x=motion_y=0;
 }
 void mouse_pointer(BarnixPointer *out) {
     if(out){out->mouse=ps2_mouse_state;out->wheel=wheel_total;out->horizontal=horizontal_total;}
@@ -33,6 +44,9 @@ int mouse_source(unsigned int source,int connected,int dx,int dy,unsigned int bu
     /* Bound untrusted HID deltas before adding to the logical cursor. */
     if(dx>640)dx=640;if(dx< -640)dx= -640;
     if(dy>400)dy=400;if(dy< -400)dy= -400;
+    /* Games need movement past the screen edge: keep unclamped deltas. */
+    if(motion_x+dx>-(1<<24)&&motion_x+dx<(1<<24))motion_x+=dx;
+    if(motion_y+dy>-(1<<24)&&motion_y+dy<(1<<24))motion_y+=dy;
     int x=ps2_mouse_state.x+dx,y=ps2_mouse_state.y+dy;
     if(x<0)x=0;if(x>639)x=639;if(y<0)y=0;if(y>399)y=399;
     int changed=x!=ps2_mouse_state.x||y!=ps2_mouse_state.y||all_buttons!=ps2_mouse_state.buttons||available!=ps2_mouse_state.available||wheel||horizontal;
@@ -66,6 +80,14 @@ static int mouse_command(unsigned char command) {
     }
     return -1;
 }
+static int mouse_sample_rate(unsigned char rate) {
+    return mouse_command(0xf3)||mouse_command(rate)?-1:0;
+}
+static int mouse_device_id(void) {
+    if(controller(0xd4)||send_data(0xf2))return -1;
+    if(response(1)!=0xfa)return -1;
+    return response(1);
+}
 void mouse_init(void) {
     mouse_reset();
     if(controller(0xad))return; /* keyboard temporarily disabled during ACK exchange */
@@ -74,7 +96,15 @@ void mouse_init(void) {
     int config=response(0);if(config<0)goto done;
     /* IRQ handlers are not installed: both ports use the shared polling path. */
     if(controller(0x60)||send_data(config&~0x23))goto done;
-    if(mouse_command(0xf6)||mouse_command(0xf4))goto done;
+    if(mouse_command(0xf6))goto done;
+    if(!mouse_sample_rate(200)&&!mouse_sample_rate(100)&&!mouse_sample_rate(80)){
+        int id=mouse_device_id();
+        if(id==3||id==4)mouse_ps2_set_id((unsigned char)id);
+        else if(!mouse_sample_rate(200)&&!mouse_sample_rate(200)&&!mouse_sample_rate(80)){
+            id=mouse_device_id();if(id==4)mouse_ps2_set_id(4);
+        }
+    }
+    if(mouse_command(0xf4))goto done;
     mouse_source(0,1,0,0,0,0,0);
 done:
     controller(0xae);

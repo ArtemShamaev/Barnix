@@ -17,6 +17,17 @@ enum {
 
 void clear(void);
 void print(int color, const char *str);
+void console_capture(char *buffer, unsigned int capacity);   /* collect print() output; 0, 0 stops */
+unsigned int console_captured(void);
+void console_capture_echo(int on);   /* collected output is also shown */
+void console_capture_pause(int on);  /* output is shown but not collected */
+void console_capture_add(const char *text);   /* collected, not shown */
+void console_ansi_write(const char *data, unsigned int length);   /* Linux programs: text with ANSI sequences */
+void console_ansi_reset(void);
+void console_capture_watch(void (*watch)(void));   /* called after collected output */
+int clipboard_set(const char *text, unsigned int length);   /* ABI 14 system clipboard */
+int clipboard_get(char *out, unsigned int capacity);
+unsigned int clipboard_serial(void);
 void println(int color, const char *str);
 void console_finish_line(void);
 void printll(int color, const char *str);

@@ -3,6 +3,7 @@
 #include "permissions.h"
 #include "settings.h"
 #include "lang.h"
+#include "system_sound.h"
 static const char *names[] = {"default","dark","light","solarized","monokai","dracula","nord","bios","pink-panther","green"};
 static const unsigned char colors[] = {0x0f,0x07,0x70,0x36,0x0a,0x05,0x1b,0x1f,0x5f,0x02};
 void user_config_path(const char *file,char *out) {
@@ -26,6 +27,8 @@ void settings_load(void) {
     int n=fs_size(path),i=0;
     if(n>0 && n<64 && fs_read(path,0,text,n)==n) { text[n]=0; int found=theme_index(text);if(found>=0)i=found; }
     console_theme(colors[i]>>4,colors[i]&15);
+    user_config_path("sounds.cfg",path);n=fs_size(path);
+    system_sound_enable(!(n==3 && fs_read(path,0,text,3)==3 && !memcmp(text,"off",3)));
     language_reset();
     system_init();
 }

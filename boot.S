@@ -27,6 +27,16 @@ gdt_loaded:
     mov %ax, %gs
     mov %ax, %ss
 
+    /* Statically linked glibc and modern GCC use XMM registers at startup. */
+    mov %cr0, %eax
+    and $0xfffffff3, %eax
+    or $0x2, %eax
+    mov %eax, %cr0
+    mov %cr4, %eax
+    or $0x600, %eax
+    mov %eax, %cr4
+    fninit
+
     mov $kernel_stack_top, %esp
     xor %ebp, %ebp
     sub $8, %esp
@@ -50,6 +60,10 @@ gdt_start:
     .quad 0x00CFF2000000FFFF
     .global gdt_tss_descriptor
 gdt_tss_descriptor:
+    .quad 0
+    /* Linux i386 TLS uses GDT entry 6 via set_thread_area. */
+    .global gdt_tls_descriptor
+gdt_tls_descriptor:
     .quad 0
 gdt_end:
 

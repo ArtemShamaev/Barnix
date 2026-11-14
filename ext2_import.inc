@@ -2,7 +2,7 @@
  * The destination is already formatted and selected. No source writes occur. */
 static const unsigned char *import_image;
 static unsigned int import_bytes, import_inode_size, import_inodes, import_table;
-static unsigned char import_data[MAX_FILE];
+#define import_data ((unsigned char *)file_scratch)
 static unsigned char import_verify[4096];
 static const unsigned char import_zero[BLOCK_SIZE];
 static const unsigned char *import_block(unsigned int n)
@@ -21,9 +21,14 @@ static const unsigned char *import_inode(unsigned int n)
 static const unsigned char *import_file_block(const unsigned char *node, unsigned int index)
 {
     if (index < 12) return import_block(get32(node + 40 + index * 4));
-    if (index >= 268) return NULL;
-    const unsigned char *indirect = import_block(get32(node + 88));
-    return indirect ? import_block(get32(indirect + (index - 12) * 4)) : NULL;
+    if (index < 268) {
+        const unsigned char *indirect = import_block(get32(node + 88));
+        return indirect ? import_block(get32(indirect + (index - 12) * 4)) : NULL;
+    }
+    if (index >= MAX_FILE / BLOCK_SIZE) return NULL;
+    const unsigned char *doubly = import_block(get32(node + 92));
+    const unsigned char *level = doubly ? import_block(get32(doubly + (index - 268) / 256 * 4)) : NULL;
+    return level ? import_block(get32(level + (index - 268) % 256 * 4)) : NULL;
 }
 static int import_mode(const char *name, unsigned int mode)
 {
@@ -79,7 +84,7 @@ static int import_directory(unsigned int ino, unsigned int depth)
 }
 int fs_import_template(const void *image, unsigned int bytes)
 {
-    if (!image || bytes != 2 * 1024 * 1024) return -1;
+    if (!image || bytes != 4 * 1024 * 1024) return -1;   /* Setup/build.py FS_SECTORS */
     import_image = image; import_bytes = bytes;
     const unsigned char *sb = import_image + 1024;
     if (get16(sb + 56) != 0xef53 || get32(sb + 24) || get32(sb + 4) > bytes / BLOCK_SIZE ||
