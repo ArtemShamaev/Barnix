@@ -25,7 +25,7 @@ def main():
             shutil.copy2(ROOT / 'BDK/templates' / (source + '.' + extension), project / 'src' / ('main.' + extension))
             subprocess.run([sys.executable, str(sdk / 'tools/build.py'), str(project)], env=env, check=True)
             data = (project / 'elf/app.elf').read_bytes()
-            assert data[:9] == b'\x7fELF\x01\x01\x01\xff\x09'
+            assert data[:9] == b'\x7fELF\x01\x01\x01\xff\x0c'
             shutil.copy2(project / 'elf/app.elf', artifacts / (template + '-' + extension + '.elf'))
     project = args.output / 'runtime'; (project / 'src').mkdir(parents=True, exist_ok=True)
     (project / 'src/main.cpp').write_text('''#define BARNIX_APP_NAME "runtime.elf"

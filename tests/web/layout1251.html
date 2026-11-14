@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html><head><meta charset="windows-1251"><title>Layout</title>
+<style>
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.5 Georgia, serif; }
+.top { position: fixed; top: 0; left: 0; right: 0; height: 36px; background: rgba(20,20,40,.85); color: #fff; padding: 6px 12px; z-index: 10; }
+.page { padding: 48px 16px 16px; }
+.box { width: 50%; margin: 10px auto; padding: 10px; border: 3px double #886; background: #ffe; }
+.rel { position: relative; height: 80px; background: #eef6ee; border: 1px solid #9c9; }
+.abs { position: absolute; right: 8px; bottom: 8px; background: #393; color: white; padding: 2px 8px; }
+.wrap { display: flex; flex-wrap: wrap; gap: 8px; }
+.wrap span { background: #fde; border: 1px solid #c8a; padding: 4px 10px; border-radius: 12px; }
+.center { display: flex; justify-content: center; align-items: center; height: 90px; background: #222; color: #fd0; font-size: 22px; }
+.col { display: flex; flex-direction: column; gap: 4px; width: 200px; }
+.col div { background: #ddeeff; padding: 3px 6px; }
+pre { background: #272822; color: #f8f8f2; padding: 10px; overflow: auto; }
+.hidden { display: none; }
+.ghost { visibility: hidden; }
+.faded { opacity: 0.4; }
+.nowrap { white-space: nowrap; overflow: hidden; width: 200px; border: 1px solid #aaa; }
+.long { word-break: break-all; width: 160px; border: 1px solid #aaa; }
+.clear { clear: both; }
+.l { float: left; width: 100px; height: 50px; background: #acf; margin-right: 10px; }
+hr { margin: 16px 0; }
+dl dt { font-weight: bold; } dd { margin-left: 24px; }
+.vw { width: 30vw; background: #fcc; }
+.minmax { width: min(100%, 300px); background: #cfc; }
+.clamp { font-size: clamp(12px, 2vw, 30px); }
+</style></head>
+<body>
+<div class="top">Fixed header <b>position: fixed</b></div>
+<div class="page">
+<h1>Раскладка (windows-1251)</h1>
+<div class="box">Box: width 50%, margin auto, double border</div>
+<div class="rel">relative container <div class="abs">absolute, bottom right</div></div>
+<div class="wrap"><span>flex-wrap</span><span>tags</span><span>one</span><span>two</span><span>three</span><span>four</span><span>five</span><span>six</span><span>seven</span><span>eight</span><span>nine</span><span>ten</span><span>eleven</span><span>twelve</span></div>
+<div class="center">Centered both ways</div>
+<div class="col"><div>column 1</div><div>column 2</div><div>column 3</div></div>
+<pre>
+int main(void)
+{
+    printf("Hello, Barnix!\n");   /* &lt;pre&gt; keeps spaces */
+}
+</pre>
+<p class="hidden">You must not see this.</p>
+<p>Before <span class="ghost">invisible</span> after. <span class="faded">Faded text.</span></p>
+<div class="nowrap">This line does not wrap and is clipped by overflow hidden</div>
+<div class="long">Averyveryveryverylongwordthatmustbebrokenanywhere</div>
+<div class="l"></div><p>Text next to a left float. Text next to a left float. Text next to a left float. Text next to a left float.</p>
+<div class="clear"></div>
+<hr>
+<dl><dt>Term</dt><dd>Definition of the term.</dd><dt>Other</dt><dd>Another one.</dd></dl>
+<div class="vw">30vw</div><div class="minmax">min(100%, 300px)</div><p class="clamp">clamp() size</p>
+<center><table border="1" cellpadding="4" bgcolor="#eeeeff"><tr><td>legacy</td><td><font color="red" size="+1">font</font></td></tr><tr><td colspan="2" align="center">center</td></tr></table></center>
+<p>Entities: &amp; &lt; &gt; &quot; &copy; &reg; &euro; &mdash; &laquo;&raquo; &#169; &#x263A; &hellip;</p>
+</div>
+</body></html>

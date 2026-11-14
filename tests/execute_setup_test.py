@@ -22,9 +22,9 @@ def main():
                 start=struct.unpack_from('<I',template,454)[0]*512
                 image=work/f'{firmware}-{profile}.ext2'
                 image.write_bytes(template[start:])
-                assert 'Mode:  0755' in debug(image,'stat /bin/execute'), (firmware,profile)
+                assert 'Mode:  0755' in debug(image,'stat /usr/bin/execute'), (firmware,profile)
                 extracted=work/f'{firmware}-{profile}-execute'
-                debug(image,f'dump /bin/execute {extracted}')
+                debug(image,f'dump /usr/bin/execute {extracted}')
                 assert extracted.read_bytes()==(ROOT/'apps/bin/execute').read_bytes()
         target=work/'target.img'
         with target.open('wb') as f:f.truncate(96*1024*1024)

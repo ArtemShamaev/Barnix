@@ -16,6 +16,9 @@ class Guest:
         self.storage_port = '1.1' if hub else '1'
         topology = ['-device', 'usb-hub,bus=uhci.0,port=1,id=hub'] if hub else []
         self.usb_name = 'usb2' if os.environ.get('USB_HOST') in ('ehci','ehci-companion') else 'usb0'
+        if hub and os.environ.get('USB_HOST') != 'xhci':
+            # Hub children follow the root ports (UHCI 2, QEMU OHCI 3); the mouse came first.
+            self.usb_name = 'usb4' if os.environ.get('USB_HOST') == 'ohci' else 'usb3'
         mouse_bus = 'uhci.0'
         if os.environ.get('USB_HOST') == 'ehci':
             topology += ['-device', 'piix3-usb-uhci,id=mousehost']

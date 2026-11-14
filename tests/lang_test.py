@@ -21,13 +21,16 @@ class Guest:
             '-drive', f'file={disk},format=raw,if=ide', '-display', 'none',
             '-serial', 'none', '-monitor', 'stdio', '-no-reboot'],
             stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-        time.sleep(3)
-        self.key('ret')
-        deadline=time.monotonic()+15
+        # Barnix boots within seconds: press Enter only while GRUB's menu is
+        # shown, or it becomes the first password.
+        deadline=time.monotonic()+30
+        text=''
         while time.monotonic()<deadline:
-            text=self.screen()
-            if 'New root password:' in text or 'Login:' in text:break
             time.sleep(.2)
+            try: text=self.screen()
+            except FileNotFoundError: continue
+            if 'New root password:' in text or 'Login:' in text:break
+            if 'RAM only' in text: self.key('ret'); time.sleep(.5)
         if 'New root password:' in text:
             for prompt,value in [('New root password:','rootpw'),('Repeat root password:','rootpw'),('New username:','alice'),('New user password:','alicepw'),('Repeat user password:','alicepw')]:
                 self.expect(prompt);self.type(value);self.key('ret')
@@ -119,7 +122,7 @@ with tempfile.TemporaryDirectory(prefix='barnix-lang-') as temporary:
         prefix = 'x' * 68
         guest.type('echo ' + prefix + 'А'); guest.key('backspace'); guest.type('Б'); guest.key('ret')
         guest.expect('\n' + prefix + 'Б\n')
-        guest.command('help', 'применить настройки без перезагрузки')
+        guest.command('help', 'brm -S ИМЯ - установить программу из репозитория')
         # Capture actual pixels as well as glyph codes, for manual font inspection.
         guest.command('echo АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ', '\nАБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ\n')
         guest.type('echo абвгдеёжзийклмнопрстуфхцчшщъыьэюя'); guest.key('ret')

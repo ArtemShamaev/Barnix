@@ -53,6 +53,13 @@ int main(int argc,char **argv) {
     CHECK(!switch_user("root","rootpw"));CHECK(!fs_init());CHECK(!switch_user("alice",""));
     CHECK(fs_load_executable("/bin/test",data,sizeof(data))==-13);CHECK(!fs_write("locked","persisted",9));
     CHECK(!switch_user("root","rootpw"));
+    permissions_restore("../invalid");CHECK(permissions_root());
+    permissions_restore("a-very-long-user-name-that-cannot-fit");CHECK(permissions_root());
+    permissions_restore(NULL);CHECK(permissions_root());
+    char oversized_acl[8194];memset(oversized_acl,'A',sizeof(oversized_acl)-1);oversized_acl[sizeof(oversized_acl)-1]=0;
+    CHECK(!fs_write("/etc/access.cfg",oversized_acl,sizeof(oversized_acl)-1));
+    CHECK(set_file_permissions("/bin/test","alice=r",""));
+    CHECK(fs_size("/etc/access.cfg")==sizeof(oversized_acl)-1);
     /* Partition planner rejects overlap, overflow, GPT, full tables. */
     PartitionTable t;memset(&t,0,sizeof(t));t.sectors=65536;
     CHECK(!partition_add(&t,0,2048,8192,0x83));CHECK(partition_add(&t,1,4096,8192,0x83));

@@ -25,7 +25,7 @@ with tempfile.TemporaryDirectory(prefix='barnix-execve-') as temporary:
     shutil.copyfile('live-ext2.img', disk)
     subprocess.run(['python3', 'scripts/install_apps.py', str(disk), str(parent), str(child), str(fork_probe)], check=True)
     result = subprocess.run([
-        'qemu-system-i386', '-m', '64M', '-kernel', 'kernel-test.elf',
+        'qemu-system-i386', '-m', '128M', '-kernel', 'kernel-test.elf',
         '-initrd', str(disk), '-append', 'linux-selftest', '-display', 'none',
         '-serial', 'none', '-monitor', 'none', '-no-reboot',
         '-device', 'isa-debug-exit,iobase=0xf4,iosize=0x04',

@@ -12,7 +12,7 @@ with tempfile.TemporaryDirectory(prefix='barnix-linux-') as directory:
     assert contents == b'redirected', contents
     log = pathlib.Path(directory) / 'qemu.log'
     result = subprocess.run([
-        'qemu-system-i386', '-m', '64M', '-kernel', 'kernel-test.elf',
+        'qemu-system-i386', '-m', '128M', '-kernel', 'kernel-test.elf',
         '-initrd', 'live-ext2.img', '-append', 'linux-selftest', '-display', 'none', '-serial', 'none',
         '-monitor', 'none', '-no-reboot',
         '-device', 'isa-debug-exit,iobase=0xf4,iosize=0x04',

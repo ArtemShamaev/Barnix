@@ -48,7 +48,7 @@ def main():
             debug(disk, f'write "{source}" /work/{dest}')
             debug(disk, f'set_inode_field /work/{dest} mode {mode}')
         # Old ABI entry points must receive their own version while using the
-        # unchanged API prefix on the ABI 9 kernel.
+        # unchanged API prefix on the ABI 10 kernel.
         for version in (7, 8):
             source = work / f'compat{version}.c'
             binary = work / f'compat{version}'
@@ -111,7 +111,7 @@ def main():
             g.key('esc'); g.expect('bssh>'); g.command('pwd', '/work')
             g.command('cat b.txt', 'EXECUTE text preview works.')
             g.command('su tester', 'bssh>')
-            g.command('missing-command', 'Command not found: /bin/missing-command')
+            g.command('missing-command', 'Command not found: /usr/bin/missing-command')
             g.type('execute'); g.key('ret'); g.expect('Barnix Execute')
             # A user's own home is browsable; listing protected /home is denied.
             g.key('h'); g.expect('/home/tester')

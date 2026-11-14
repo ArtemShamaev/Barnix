@@ -28,11 +28,25 @@ def run(disk, directory, commands, live_only=False, command_timeout=10, extra_di
                          for i in range(0, 2000, 80))
 
     try:
-        time.sleep(3)
-        if live_only:
-            monitor('sendkey down')
-            time.sleep(0.2)
-        monitor('sendkey ret')
+        # GRUB boots the default entry after 1 s and Barnix can reach the shell
+        # within seconds, so press keys only while the menu is on screen; a
+        # blind Enter would become the first password.
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            time.sleep(0.05)
+            try:
+                text = screen()
+            except FileNotFoundError:
+                continue
+            if 'RAM only' in text:
+                if live_only:
+                    monitor('sendkey down')
+                    time.sleep(0.1)
+                monitor('sendkey ret')
+                break
+            if 'Booting `Barnix' in text or 'BARNIX' in text or 'starting shell' in text:
+                assert not live_only, ('GRUB menu was missed', text)
+                break
         time.sleep(3)
         text = screen()
         def send(text):
@@ -40,12 +54,21 @@ def run(disk, directory, commands, live_only=False, command_timeout=10, extra_di
                 monitor('sendkey '+{' ':'spc','/':'slash','-':'minus'}.get(character,character)+' 1')
                 time.sleep(.025)
             monitor('sendkey ret 1');time.sleep(.4)
+        prompt_deadline = time.monotonic() + 30
+        while not any(marker in text for marker in ('First start:', 'Login:', 'bssh>')) \
+                and time.monotonic() < prompt_deadline:
+            time.sleep(0.2)
+            text = screen()
         if 'First start:' in text:
             for answer in ('rootpw','rootpw','tester','testerpw','testerpw'):
                 send(answer)
             text=screen()
         if 'Login:' in text and 'bssh>' not in text:
             send('root');send('rootpw');text=screen()
+        deadline = time.monotonic() + 15
+        while 'bssh>' not in text and time.monotonic() < deadline:
+            time.sleep(0.2)
+            text = screen()
         assert 'bssh>' in text, ('Shell did not start', text)
         send('cd /');send('clear')
         for command, expected in commands:
@@ -53,7 +76,9 @@ def run(disk, directory, commands, live_only=False, command_timeout=10, extra_di
                 key = {' ': 'spc', '.': 'dot', '/': 'slash', '-': 'minus',
                        '|': 'shift-backslash', '<': 'shift-comma', '>': 'shift-dot',
                        "'": 'apostrophe', '"': 'shift-apostrophe', '\\': 'backslash',
-                       ';': 'semicolon', '&': 'shift-7'}.get(character, character)
+                       ';': 'semicolon', ':': 'shift-semicolon', '&': 'shift-7'}.get(character, character)
+                if character.isupper():
+                    key = 'shift-' + character.lower()
                 monitor(f'sendkey {key} 1')
                 time.sleep(0.025)
             monitor('sendkey ret 1')

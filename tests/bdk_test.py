@@ -56,7 +56,7 @@ def main():
                 run(['dotnet', 'run', '--project', project], env=env)
                 binary = project / 'elf/app.elf'
                 data = binary.read_bytes()
-                assert data[:9] == b'\x7fELF\x01\x01\x01\xff\x09'
+                assert data[:9] == b'\x7fELF\x01\x01\x01\xff\x0c'
                 assert not run(['nm', '-u', binary], capture_output=True, text=True).stdout.strip()
                 exported = ARTIFACTS / f'{template}-{language}.elf'
                 shutil.copyfile(binary, exported); elfs.append(exported)

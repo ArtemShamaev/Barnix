@@ -10,7 +10,7 @@ int main(int argc, char **argv)
     CHECK(blocks == FS_MAX_BLOCKS && groups == 640);
     CHECK(fs_init() == 0);
     unsigned int initial_free = get32(SB + 12);
-    static char contents[FS_MAX_FILE_SIZE], result[FS_MAX_FILE_SIZE];
+    static char contents[FS_MAX_EXECUTABLE_SIZE], result[FS_MAX_EXECUTABLE_SIZE];
     for (unsigned int i = 0; i < sizeof(contents); i++) contents[i] = i % 251;
     /* Force a real allocation beyond 4 GiB, without filling the entire disk. */
     allocation_hint[0] = groups - 1;
@@ -20,7 +20,15 @@ int main(int argc, char **argv)
     CHECK(fs_init() == 0);
     CHECK(fs_read("far", 0, result, sizeof(result)) == sizeof(result));
     CHECK(!memcmp(contents, result, sizeof(result)));
-    CHECK(fs_append("far", "x", 1) == -1);
+    CHECK(fs_append("far", "x", 1) == 0);
+    CHECK(fs_size("far") == FS_MAX_EXECUTABLE_SIZE + 1);
+    CHECK(fs_write("sparse-gigabyte", "", 0) == 0);
+    CHECK(fs_pwrite("sparse-gigabyte", FS_MAX_FILE_SIZE - 1, "z", 1, 0) == FS_MAX_FILE_SIZE);
+    CHECK(fs_size("sparse-gigabyte") == FS_MAX_FILE_SIZE);
+    CHECK(fs_pwrite("sparse-gigabyte", FS_MAX_FILE_SIZE, "x", 1, 0) == -27);
+    CHECK(fs_init() == 0);
+    CHECK(fs_read("sparse-gigabyte", FS_MAX_FILE_SIZE - 1, result, 1) == 1 && result[0] == 'z');
+    CHECK(fs_rm("sparse-gigabyte") == 0);
     CHECK(fs_mkdir("many") == 0); CHECK(fs_cd("many") == 0);
     for (int i = 0; i < 160; i++) {
         char name[] = {'f', (char)('0' + i / 100), (char)('0' + i / 10 % 10), (char)('0' + i % 10), 0};
@@ -31,6 +39,6 @@ int main(int argc, char **argv)
     CHECK(fs_read("/many/f159", 0, result, 7) == 7 && !memcmp(result, "updated", 7));
     CHECK(get32(SB + 12) < initial_free);
     CHECK(fs_sync() == 0); CHECK(fclose(disk_stream) == 0);
-    puts("5 GiB ext2, high block addresses and multiple inode groups passed");
+    puts("1 GiB files, 5 GiB ext2, high block addresses and multiple inode groups passed");
     return 0;
 }

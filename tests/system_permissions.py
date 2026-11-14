@@ -31,9 +31,9 @@ def install(directory,target,mode,efi=False):
         g.key('ret')
         if mode==2:
             g.expect('Manual partition table')
-            for command in ['n 3 4 8','r 3','w']:
+            for command in ['n 3 4 12','r 3','w']:
                 g.type(command);g.key('ret');time.sleep(.2)
-        g.expect('Choose what to install');g.key('down');g.key('ret');g.expect('Make this system yours');g.key('ret');users(g)
+        g.expect('Choose what to install');g.key('down');g.key('down');g.key('spc');g.key('ret');g.expect('Network settings');g.key('ret');g.expect('Make this system yours');g.key('ret');users(g)
         g.type('disk1');g.key('ret');g.expect('Barnix is installed!',180)
     finally:g.close()
 
@@ -54,7 +54,7 @@ def exercise(g,directory):
     g.type('sudo whoami');g.key('ret');g.expect('[sudo] root password:');g.type('wrong');g.key('ret');g.expect('Authentication failed');g.command('whoami','alice')
     g.type('sudo whoami');g.key('ret');g.expect('[sudo] root password:');g.type('rootpw');g.key('ret');time.sleep(.5);text=g.screen();assert '\nroot\n' in text,text;g.command('whoami','alice')
     su(g,'root','rootpw');g.command('chmod alice=r passwd=unlock file=/home/alice/test','program exited: 0')
-    g.command('chmod alice=x file=/bin/cat','program exited: 0')
+    g.command('chmod alice=x file=/usr/bin/cat','program exited: 0')
     su(g,'alice','');g.command('write test blocked','program exited: 1')
     g.command('chmod alice=rw passwd=wrong file=test','program exited: 1')
     g.command('chmod alice=rw passwd=unlock file=test','program exited: 0')
@@ -64,6 +64,16 @@ def exercise(g,directory):
     g.command('theme green','Theme applied and saved')
 
 def main():
+    # Games come from the package repository (Setup/run.py serves it at 8073).
+    import functools, threading
+    from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+    handler=functools.partial(SimpleHTTPRequestHandler,directory=str(ROOT/'Setup/build/packages'))
+    server=ThreadingHTTPServer(('127.0.0.1',8073),handler)
+    threading.Thread(target=server.serve_forever,daemon=True).start()
+    try:run_cases()
+    finally:server.shutdown();server.server_close()
+
+def run_cases():
     cases=[(0,False),(1,False),(2,False),(1,True)]
     if "--remaining" in sys.argv:cases=cases[2:]
     for mode,efi in cases:
@@ -84,6 +94,7 @@ def main():
             with target.open('rb') as f:f.seek(start*512);fs.write_bytes(f.read(length*512))
             subprocess.run(['e2fsck','-fn',str(fs)],check=True)
             records=debug(fs,'cat /etc/userpasswd.cfg');assert '$bx1$' in records and 'alicepw' not in records
+            if mode!=2 and 'mc.jar' in debug(ROOT/'live-ext2.img','ls /mc'):assert 'mod.jar' in debug(fs,'ls /mc'),'Setup did not copy /mc'
             g=Guest(directory,[target],setup=False,efi=efi)
             try:
                 if mode==0:exercise(g,directory)

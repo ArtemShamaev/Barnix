@@ -28,6 +28,16 @@ int main(void){
     assert(!mouse_usb_report(report,3));assert(state().sequence==sequence);
     report[0]=BARNIX_MOUSE_MIDDLE;assert(mouse_usb_report(report,3));
     assert(state().buttons==BARNIX_MOUSE_MIDDLE);
+    mouse_reset();mouse_ps2_set_id(3);
+    assert(!mouse_feed(8));assert(!mouse_feed(1));assert(!mouse_feed(0));
+    assert(mouse_feed(0x0f));BarnixPointer pointer;mouse_pointer(&pointer);
+    assert(pointer.wheel==-1&&state().x==321);
+    mouse_reset();mouse_ps2_set_id(4);
+    assert(!mouse_feed(8));assert(!mouse_feed(0));assert(!mouse_feed(0));
+    assert(mouse_feed(0x3f));mouse_pointer(&pointer);
+    assert(pointer.wheel==-1&&state().buttons==(BARNIX_MOUSE_BACK|BARNIX_MOUSE_FORWARD));
+    assert(!mouse_feed(0));assert(!mouse_feed(8));assert(!mouse_feed(0));assert(!mouse_feed(0));
+    assert(mouse_feed(0));assert(!state().buttons);
     puts("USB boot reports: signed deltas, button masks, short reports and idle passed");
-    puts("PS/2 packet framing, signed deltas, buttons, overflow and clipping passed");
+    puts("PS/2 framing, wheel, side buttons, signed deltas, overflow and clipping passed");
 }

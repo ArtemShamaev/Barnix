@@ -1,5 +1,6 @@
 const char *tr(const char *s) { return s; }
 /* Host tests: real FS implementation with an in-memory sector device. */
+#define BARNIX_FS_HOST
 #include "fs.c"
 
 extern void abort(void);
@@ -32,9 +33,10 @@ int disk_read(unsigned int lba, void *buffer)
     return 0;
 #endif
 }
+unsigned int disk_writes;
 int disk_write(unsigned int lba, const void *buffer)
 {
-    write_calls++;
+    write_calls++; disk_writes++;
 #ifdef FS_FILE_BACKED
     if (lba >= mock_selection.sectors || fail_writes || fail_after == 0 ||
         fseeko(disk_stream, ((long)lba + mock_selection.offset) * 512, 0)) return -1;
@@ -51,6 +53,12 @@ int disk_read_many(unsigned int lba, void *buffer, unsigned int count)
 {
     for (unsigned int i = 0; i < count; i++)
         if (disk_read(lba + i, (unsigned char *)buffer + i * 512)) return -1;
+    return 0;
+}
+int disk_write_many(unsigned int lba, const void *buffer, unsigned int count)
+{
+    for (unsigned int i = 0; i < count; i++)
+        if (disk_write(lba + i, (const unsigned char *)buffer + i * 512)) return -1;
     return 0;
 }
 void disk_info(void) {}
@@ -153,6 +161,16 @@ int main(int argc, char **argv)
     CHECK(fs_rm("link") == -1);
     CHECK(fs_write("a", "hello", 5) == 0);
     CHECK(fs_append("a", " world", 6) == 0);
+    CHECK(fs_write("partial", "abcdef", 6) == 0);
+    CHECK(fs_write_at("partial", 2, "XY", 2, 0) == 4);
+    CHECK(fs_write_at("partial", 10, "Z", 1, 0) == 11);
+    CHECK(fs_write_at("partial", 0, "!", 1, 1) == 12);
+    CHECK(fs_write_at("partial", 20, "", 0, 0) == 20);
+    CHECK(fs_size("partial") == 12);
+    char partial[12];
+    CHECK(fs_read("partial", 0, partial, sizeof(partial)) == sizeof(partial));
+    CHECK(memcmp(partial, "abXYef\0\0\0\0Z!", sizeof(partial)) == 0);
+    CHECK(fs_rm("/partial") == 0);
     CHECK(fs_cp("a", "b") == 0);
     CHECK(fs_cp("a", "b") == -1);
     CHECK(fs_mv("b", "a") == -1);
@@ -171,7 +189,7 @@ int main(int argc, char **argv)
     CHECK(fs_size("текст") == 4);
     CHECK(fs_rm("текст") == 0);
     CHECK(fs_cd("/") == 0);
-    CHECK(fs_rmdir("язык") == 0);
+    CHECK(fs_rmdir("/язык") == 0);
     CHECK(fs_mkdir("dir") == 0);
     CHECK(fs_cp("dir", "copy") == -1);
     CHECK(fs_cd("dir") == 0);
@@ -211,12 +229,18 @@ int main(int argc, char **argv)
     CHECK(fs_rmdir("/") == -1);
     CHECK(fs_mv("/", "root") == -1);
     CHECK(fs_touch("bad/name") == -1);
-    CHECK(fs_touch("123456789012345678901234") == -1);
+    CHECK(fs_touch("123456789012345678901234") == 0);
+    CHECK(fs_rm("123456789012345678901234") == 0);
+    char too_long[257];
+    memset(too_long, 'x', 256); too_long[256] = 0;
+    CHECK(fs_touch(too_long) == -1);
     CHECK(fs_write("a", "", -1) == -1);
     CHECK(fs_write("a", "", FS_MAX_FILE_SIZE + 1) == -1);
     CHECK(fs_append("a", "", FS_MAX_FILE_SIZE + 1) == -1);
     expect_cat("a", "hello world\n");
-    static char full[FS_MAX_FILE_SIZE], verify[FS_MAX_FILE_SIZE];
+    /* The small interoperability disk is 2 MiB. Full 16 MiB files are tested
+     * by large_fs_test on its larger volume. */
+    static char full[640 * 1024], verify[640 * 1024];
     for (unsigned int i = 0; i < sizeof(full); i++) full[i] = i % 251;
     CHECK(fs_size("binary") == 40000);
     CHECK(fs_read("binary", 12000, verify, 4096) == 4096);
@@ -229,7 +253,7 @@ int main(int argc, char **argv)
     CHECK(verify[19999] == 'z');
     CHECK(fs_append("sparse", "!", 1) == 0);
     CHECK(fs_write("full", full, sizeof(full)) == 0);
-    CHECK(fs_size("full") == FS_MAX_FILE_SIZE);
+    CHECK(fs_size("full") == sizeof(full));
     CHECK(fs_read("full", 0, verify, sizeof(verify)) == sizeof(verify));
     CHECK(memcmp(full, verify, sizeof(full)) == 0);
     CHECK(fs_cp("full", "fullcopy") == 0);
@@ -265,7 +289,8 @@ int main(int argc, char **argv)
         char name[] = {'f', (char)('0' + i), 0}; CHECK(fs_rm(name) == 0);
     }
     CHECK(get32(SB + 12) == free_before);
-    CHECK(fs_append("full", "x", 1) == -1);
+    CHECK(fs_append("full", "x", 1) == 0);
+    CHECK(fs_size("full") == (int)sizeof(full) + 1);
     CHECK(fs_append("full", "", 0) == 0);
     CHECK(fs_sync() == 0);
     int created = 0;
@@ -322,6 +347,7 @@ int main(int argc, char **argv)
     CHECK(fs_init() == 0);
     unsigned int root_sector = get32(inode(ROOT_INO) + 40) * 2;
     put16(test_disk[root_sector] + 4, 0); /* Invalid directory record length. */
+    disk_writes++; /* written around the filesystem, like a raw disk tool */
     CHECK(fs_init() == -1);
     CHECK(fs_touch("refused") == -1);
     test_disk[2][56] = 0;

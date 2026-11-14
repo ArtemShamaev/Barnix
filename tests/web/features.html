@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Gouse Web — проверка</title>
+<style>
+:root { --accent: #2f6fd0; --pad: 12px; }
+body { font-family: Arial, sans-serif; margin: 0; color: #222; background: #f4f6fa; }
+header { background: linear-gradient(to right, var(--accent), #6ab0ff); color: white; padding: var(--pad) 20px; display: flex; align-items: center; justify-content: space-between; }
+header h1 { margin: 0; font-size: 1.6rem; }
+nav a { color: white; margin-left: 14px; text-decoration: none; font-weight: bold; }
+main { max-width: 760px; margin: 16px auto; padding: 0 12px; }
+.card { background: white; border-radius: 10px; border: 1px solid #d0d7e2; padding: 14px 18px; margin-bottom: 14px; }
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.grid div { background: #e8f0ff; padding: 10px; border-radius: 6px; text-align: center; }
+.row { display: flex; gap: 12px; }
+.row > * { flex: 1; }
+.float { float: right; width: 120px; height: 70px; background: #ffd9a0; margin: 0 0 8px 12px; border: 2px dashed #c07000; }
+table { border-collapse: collapse; width: 100%; }
+th, td { border: 1px solid #b8c2d0; padding: 4px 8px; text-align: left; }
+th { background: #dde6f5; }
+tr:nth-child(even) td { background: #f6f8fc; }
+.btn { display: inline-block; background: var(--accent); color: #fff; padding: 6px 14px; border-radius: 16px; text-decoration: none; }
+.small { font-size: calc(0.75rem + 2px); color: #667; }
+code { background: #eef; padding: 1px 4px; border-radius: 3px; }
+@media (max-width: 500px) { .grid { grid-template-columns: 1fr; } }
+.note::before { content: "★ "; color: #e0a000; }
+blockquote { border-left: 4px solid var(--accent); margin: 8px 0; padding: 4px 12px; color: #445; font-style: italic; }
+</style>
+</head>
+<body>
+<header><h1>Gouse&nbsp;Web</h1><nav><a href="#lists">Списки</a><a href="#table">Таблица</a><a href="#form">Форма</a></nav></header>
+<main>
+<div class="card">
+  <div class="float">float: right</div>
+  <h2>HTML5 и CSS3</h2>
+  <p>Это <b>жирный</b>, <i>курсив</i>, <u>подчёркнутый</u>, <s>зачёркнутый</s> текст и <a href="page2.html">ссылка на другую страницу</a>.
+  Длинный абзац, который должен переноситься по словам и обтекать плавающий блок справа, пока тот не закончится. Mixed English text with <code>inline code</code> and H<sub>2</sub>O, E=mc<sup>2</sup>.</p>
+  <p class="note small">Псевдоэлемент ::before, calc() и переменные CSS.</p>
+  <img src="logo.png" alt="logo"> <img src="logo.png" width="32" height="32" alt="small"> <a class="btn" href="#form">Кнопка-ссылка</a>
+</div>
+<div class="card" id="lists">
+  <h3>Списки</h3>
+  <div class="row">
+    <ul><li>Первый</li><li>Второй<ul><li>вложенный</li></ul></li><li>Третий</li></ul>
+    <ol start="3"><li>три</li><li>четыре</li><li value="10">десять</li><li>одиннадцать</li></ol>
+  </div>
+  <blockquote>Цитата: «Всё должно быть изложено так просто, как только возможно, но не проще».</blockquote>
+</div>
+<div class="card">
+  <h3>Grid и Flex</h3>
+  <div class="grid"><div>1</div><div>2</div><div>3</div><div>4</div><div>5</div></div>
+</div>
+<div class="card" id="table">
+  <h3>Таблица</h3>
+  <table>
+    <thead><tr><th>Язык</th><th>Год</th><th>Автор</th></tr></thead>
+    <tbody>
+      <tr><td>C</td><td>1972</td><td>Деннис Ритчи</td></tr>
+      <tr><td>Python</td><td>1991</td><td>Гвидо ван Россум</td></tr>
+      <tr><td colspan="2">Объединённая ячейка</td><td>—</td></tr>
+    </tbody>
+  </table>
+</div>
+<form class="card" id="form" action="search.html" method="get">
+  <h3>Форма</h3>
+  <p><label>Запрос: <input type="text" name="q" value="барникс" size="24"></label> <input type="submit" value="Найти"></p>
+  <p><input type="checkbox" name="a" checked> флажок <input type="radio" name="r" value="1" checked> один <input type="radio" name="r" value="2"> два
+  <select name="s"><option>Первый вариант</option><option selected>Второй</option></select></p>
+  <textarea name="t" rows="3" cols="30">Многострочное
+поле</textarea>
+  <p><button type="submit">Кнопка &lt;button&gt;</button> <input type="password" name="p" value="secret"></p>
+</form>
+<p class="small" style="text-align:center">&copy; 2026 Barnix &middot; страница для проверки движка</p>
+</main>
+</body>
+</html>

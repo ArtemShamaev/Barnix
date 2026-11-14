@@ -6,11 +6,11 @@ import tempfile
 with tempfile.TemporaryDirectory(prefix='barnix-upgrade-') as tmp:
     work = pathlib.Path(tmp)
     disk = work / 'disk.img'
-    disk.write_bytes(bytes(2 * 1024 * 1024))
+    disk.write_bytes(bytes(32 * 1024 * 1024))
     note = work / 'note'
     note.write_bytes(b'preserve me\x00data')
     subprocess.run(['mke2fs', '-q', '-t', 'ext2', '-F', '-b', '1024', '-I',
-                    '128', '-N', '64', '-O', 'none,filetype', str(disk)], check=True)
+                    '128', '-N', '1024', '-O', 'none,filetype', str(disk)], check=True)
     subprocess.run(['debugfs', '-w', '-R', f'write {note} /note', str(disk)],
                    check=True, capture_output=True)
     programs = sorted(map(str, pathlib.Path('apps/bin').iterdir()))

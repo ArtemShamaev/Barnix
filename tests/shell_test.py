@@ -17,9 +17,9 @@ with tempfile.TemporaryDirectory(prefix='barnix-shell-') as temporary:
     disk = directory / 'test.img'
     shutil.copyfile('live-ext2.img', disk)
     run(disk, directory, [
-        ('help', 'run a Barnix ELF32 program'),
+        ('help', 'brm -S NAME'),
         ('/bin/echo absolute', 'absolute'),
-        ('./bin/echo relative', 'relative'),
+        ('./usr/bin/echo relative', 'relative'),
         ('hello.elf argcheck', 'program exited: 7'),
         ('hello.elf again', 'program exited: 7'),
         ('write a hello', 'bssh>'),
@@ -34,7 +34,7 @@ with tempfile.TemporaryDirectory(prefix='barnix-shell-') as temporary:
         ('cd ..', 'bssh>'),
         ('rmdir docs', 'bssh>'),
         ('df', f'Free inodes: {base_free_inodes - 2} / 256'),
-        ('diskinfo', 'Device sectors (512 bytes): 4096'),
+        ('diskinfo', f'Device sectors (512 bytes): {disk.stat().st_size // 512}'),
         ('sync', 'filesystem saved'),
         ('unmount', 'filesystem unmounted'),
         ('mount', 'no filesystem mounted'),
@@ -73,9 +73,9 @@ with tempfile.TemporaryDirectory(prefix='barnix-exec-') as temporary:
     run(None, pathlib.Path(temporary), [
         ('write bad notelf', 'program exited: 0'),
         ('./bad', 'command not found'),
-        ('cd bin', 'program exited: 0'),
+        ('cd usr/bin', 'program exited: 0'),
         ('rm echo', 'program exited: 0'),
         ('echo absent', 'command not found'),
-        ('./help', 'run a Barnix ELF32 program'),
+        ('./help', 'brm -S NAME'),
         ('clear', 'program exited: 0'),
     ])

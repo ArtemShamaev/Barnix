@@ -46,12 +46,12 @@ with tempfile.TemporaryDirectory(prefix='barnix-add-test-') as temporary:
         partition = work / 'extracted.ext2'
         partition.write_bytes(contents[len(prefix):-len(tail)])
         for image in (disk, partition):
-            for name, expected in (('/note', note.read_bytes()), ('/bin/myapp.elf', program.read_bytes()), ('/myapp.elf', program.read_bytes())):
+            for name, expected in (('/note', note.read_bytes()), ('/usr/bin/myapp.elf', program.read_bytes()), ('/myapp.elf', program.read_bytes())):
                 output = work / 'output'
                 debug(image, f'dump {name} {output}')
                 assert output.read_bytes() == expected
                 output.unlink()
-            assert '0755' in debug(image, 'stat /bin/myapp.elf').stdout
+            assert '0755' in debug(image, 'stat /usr/bin/myapp.elf').stdout
     before = disk.read_bytes(), partitioned.read_bytes(), (work / 'Setup/extra-apps/myapp.elf').read_bytes()
     # A later bad disk must leave earlier disks and the saved application intact.
     (work / 'disks/zz-bad.img').write_bytes(b'not a filesystem')

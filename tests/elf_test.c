@@ -1,9 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "fs.h"
 #include "elf_format.c"
-#define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAILED: %s\n", #x); exit(1); } } while (0)
-static unsigned char original[300000], modified[300000];
+#define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAILED line %d: %s\n", __LINE__, #x); exit(1); } } while (0)
+static unsigned char original[FS_MAX_EXECUTABLE_SIZE + 1], modified[FS_MAX_EXECUTABLE_SIZE + 1];
 int main(int argc, char **argv)
 {
     FILE *f = fopen("apps/hello.elf", "rb"); CHECK(f);
@@ -38,7 +39,8 @@ int main(int argc, char **argv)
     RESET(); p[1].vaddr = p[0].vaddr; REJECT();
     RESET(); p[1].type = 3; REJECT();
     RESET(); p[1].type = 2; REJECT();
-    RESET(); p[1].type = 7; REJECT();
+    RESET(); p[1].type = 7; CHECK(elf_validate(modified, size, &plan) == NULL);
+    p[1].filesz = p[1].memsz + 1; REJECT();
     RESET(); p[0].flags &= ~1U; REJECT();
     RESET(); p[0].filesz = 0; REJECT();
     RESET();
