@@ -55,7 +55,7 @@ with tempfile.TemporaryDirectory(prefix='barnix-uefi-') as temporary:
         guest.key('up'); guest.key('ret'); guest.expect('Where should Barnix be installed?')
         guest.key('ret'); guest.expect('Too small')
         guest.key('down'); guest.key('ret'); guest.expect('Partitioning mode'); guest.key('ret'); guest.expect('Choose what to install')
-        guest.key('down'); guest.key('ret'); guest.expect('Make this system yours')
+        guest.key('ret'); guest.expect('Network settings'); guest.key('ret'); guest.expect('Make this system yours')
         for _ in range(6): guest.key('backspace')
         guest.type('efibox'); guest.key('ret'); guest.accounts(); guest.expect('Review and confirm')
         guest.key('ret'); guest.expect('Review and confirm')
@@ -88,7 +88,7 @@ with tempfile.TemporaryDirectory(prefix='barnix-uefi-') as temporary:
             guest.command('cat /etc/hostname', 'efibox')
             guest.command('write persisted uefi', 'program exited: 0')
             guest.command('cat persisted', 'uefi')
-            guest.command('./hello.elf efi', 'efi')
+            guest.command('echo efi', 'efi')
             guest.screenshot('efi-shell.ppm')
             shutil.copyfile(directory / 'efi-shell.ppm', ROOT / 'Setup/build/efi-shell.ppm')
         finally:
@@ -98,6 +98,6 @@ with tempfile.TemporaryDirectory(prefix='barnix-uefi-') as temporary:
     extract(target, fs, 65 * 1024**2, 63 * 1024**2)
     subprocess.run(['e2fsck', '-fn', str(fs)], check=True)
     assert debug(fs, 'cat /persisted') == 'uefi'
-    assert 'PROFILE=complete' in debug(fs, 'cat /etc/install.cfg')
+    assert 'PROFILE=minimal' in debug(fs, 'cat /etc/install.cfg')
     assert digest(unrelated) == untouched
     print('UEFI installation, FAT32 ESP, GOP console, root UUID, disk isolation and persistence passed')

@@ -6,27 +6,38 @@ import subprocess
 import tempfile
 import time
 import os
+import sys
+import functools
+import threading
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'scripts'))
+from qemu_host import performance_options
 
 
 class Guest:
-    def __init__(self, directory, disks, setup=True, transport="ide", efi=False, usb_mouse=False):
+    def __init__(self, directory, disks, setup=True, transport=None, efi=False, usb_mouse=False, gcc=False):
         self.directory = directory
         self.efi = efi
+        if transport is None:
+            transport = 'virtio' if gcc else 'ide'
         kernel = ROOT / ('Setup/kernel-efi.elf' if setup else 'kernel-efi.elf')
         if efi:
             symbols = subprocess.check_output(['nm', str(kernel)], text=True).splitlines()
             self.text_address = next(int(line.split()[0], 16) for line in symbols if line.endswith(' console_text'))
-        args = ['qemu-system-x86_64' if efi else 'qemu-system-i386', '-m', '256M', '-display', 'none', '-serial', 'none',
-                '-monitor', 'stdio', '-no-reboot']
+        args = ['qemu-system-x86_64' if efi else 'qemu-system-i386', '-m', '4096M' if gcc else '512M', '-display', 'none', '-serial', 'none',
+                '-monitor', 'stdio', '-no-reboot', '-netdev', 'user,id=net0', '-device', 'e1000,netdev=net0']
+        args += performance_options()
         if efi:
             variables = directory / 'OVMF_VARS.fd'
             shutil.copyfile('/usr/share/edk2/x64/OVMF_VARS.4m.fd', variables)
             args += ['-drive', 'if=pflash,format=raw,readonly=on,file=/usr/share/edk2/x64/OVMF_CODE.4m.fd',
                      '-drive', f'if=pflash,format=raw,file={variables}']
         if setup:
-            iso = ROOT / ('barnix-efi-setup.iso' if efi else 'barnix-legacy-setup.iso')
+            iso = ROOT / ('barnix-efi-setup-gcc.iso' if efi and gcc else
+                          'barnix-legacy-setup-gcc.iso' if gcc else
+                          'barnix-efi-setup.iso' if efi else 'barnix-legacy-setup.iso')
             args += ['-boot', 'd', '-drive', f'file={iso},format=raw,media=cdrom,if=ide,index=3']
         if transport == 'usb':
             args += ['-device', 'qemu-xhci,id=setupusb']
@@ -84,7 +95,7 @@ class Guest:
 
     def type(self, text):
         for c in text:
-            self.key({' ': 'spc', '/': 'slash', '.': 'dot', '-': 'minus'}.get(c, c))
+            self.key({' ': 'spc', '/': 'slash', '.': 'dot', '-': 'minus', '+': 'shift-equal'}.get(c, c))
 
     def command(self, text, expected):
         self.type('clear'); self.key('ret'); time.sleep(.2)
@@ -134,11 +145,26 @@ def debug(fs, command):
 
 
 def main():
+    handler = functools.partial(SimpleHTTPRequestHandler, directory=str(ROOT / 'Setup/build/packages'))
+    server = ThreadingHTTPServer(('127.0.0.1', 8073), handler)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    try:
+        run_tests()
+    finally:
+        server.shutdown(); server.server_close(); server_thread.join(timeout=2)
+
+
+def run_tests():
     with tempfile.TemporaryDirectory(prefix='barnix-setup-') as temporary:
         directory = Path(temporary)
         untouched = directory / 'disk1.img'
         # A valid but unrelated root makes selecting the wrong disk observable.
-        shutil.copyfile(ROOT / 'live-ext2.img', untouched)
+        # Keep this fixture undersized even when the live image grows.
+        with untouched.open('wb') as stream:
+            stream.truncate(2 * 1024 * 1024)
+        subprocess.run(['mke2fs', '-q', '-t', 'ext2', '-F', '-b', '1024',
+                        '-I', '128', '-O', 'none,filetype', str(untouched)], check=True)
         before = untouched.read_bytes()
         target = directory / 'disk2.img'
         with target.open('wb') as stream:
@@ -152,7 +178,8 @@ def main():
             guest.key('ret'); guest.expect('Too small')
             assert target.read_bytes() == bytes(16 * 1024 * 1024)
             guest.key('down'); guest.key('ret'); guest.expect('Partitioning mode'); guest.key('ret'); guest.expect('Choose what to install')
-            guest.key('down'); guest.key('ret'); guest.expect('Make this system yours')
+            guest.key('down'); guest.key('spc'); guest.key('down'); guest.key('spc'); guest.key('ret')
+            guest.expect('Network settings'); guest.key('ret'); guest.expect('Make this system yours')
             for _ in range(6): guest.key('backspace')
             guest.type('testbox'); guest.key('ret'); guest.accounts(); guest.expect('Review and confirm')
             guest.key('ret'); guest.expect('Review and confirm')
@@ -180,7 +207,7 @@ def main():
         assert debug(fs, 'cat /etc/hostname') == 'testbox\n'
         assert 'PROFILE=complete' in debug(fs, 'cat /etc/install.cfg')
         assert 'LANG=en' in debug(fs, 'cat /etc/sys-lang.cfg')
-        assert 'Inode:' in debug(fs, 'stat /bin/hello.elf')
+        assert 'Inode:' in debug(fs, 'stat /usr/bin/hello.elf')
         assert 'Inode:' in debug(fs, 'stat /boot/kernel.elf')
         # Keep the unrelated disk as primary: BIOS boots the installed secondary
         # disk, then the kernel must select its root by UUID rather than ata0.
@@ -213,7 +240,7 @@ def main():
             guest.expect('Welcome to Barnix Setup'); guest.key('down')
             guest.key('ret'); guest.expect('Куда установить Barnix?')
             guest.key('ret'); guest.expect('Способ разметки'); guest.key('ret'); guest.expect('Что установить?')
-            guest.key('up'); guest.key('ret'); guest.expect('Настройка системы')
+            guest.key('ret'); guest.expect('Настройки сети'); guest.key('ret'); guest.expect('Настройка системы')
             guest.key('ret'); guest.accounts(russian=True); guest.expect('Проверьте параметры')
             guest.type('disk1'); guest.key('ret'); guest.expect('Barnix установлен!', timeout=120)
         finally:
@@ -223,9 +250,9 @@ def main():
         subprocess.run(['e2fsck', '-fn', str(fs)], check=True)
         assert 'PROFILE=minimal' in debug(fs, 'cat /etc/install.cfg')
         assert debug(fs, 'cat /etc/sys-lang.cfg') == 'LANG=ru\n'
-        assert 'Inode:' not in debug(fs, 'stat /bin/hello.elf')
-        assert 'Inode:' not in debug(fs, 'stat /bin/git')
-        assert 'Inode:' in debug(fs, 'stat /bin/mount')
+        assert 'Inode:' not in debug(fs, 'stat /usr/bin/hello.elf')
+        assert 'Inode:' not in debug(fs, 'stat /usr/bin/git')
+        assert 'Inode:' in debug(fs, 'stat /usr/bin/mount')
         guest = Guest(directory, [target], setup=False)
         try:
             guest.login_root(); guest.command('cat /etc/sys-lang.cfg', 'LANG=ru')

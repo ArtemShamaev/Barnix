@@ -4,7 +4,7 @@
     {
       "id": "minimal",
       "title": "Minimal",
-      "description": "Shell, Execute desktop, files, disks and system configuration",
+      "description": "Shell, Happy Gouse and Execute, files, disks, settings",
       "commands": [
         "echo",
         "pwd",
@@ -40,7 +40,13 @@
         "fdisk",
         "theme",
         "execute",
-        "bcc"
+        "bcc",
+        "java",
+        "nova",
+        "gouse",
+        "glrunner",
+        "play",
+        "beep"
       ]
     },
     {
@@ -52,6 +58,7 @@
         "bnm",
         "get",
         "git",
+        "brm",
         "macro",
         "panic"
       ]
@@ -64,7 +71,8 @@
       "commands": [
         "snake",
         "pong",
-        "paint"
+        "paint",
+        "barnocraft"
       ],
       "examples": [
         "hello.elf",

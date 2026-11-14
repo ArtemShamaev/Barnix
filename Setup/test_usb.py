@@ -17,7 +17,7 @@ for efi in (False, True):
             guest.key('ret');guest.expect('usb0')
             guest.key('ret');guest.expect('Partitioning mode')
             guest.key('ret');guest.expect('Choose what to install')
-            guest.key('ret');guest.expect('Make this system yours')
+            guest.key('ret');guest.expect('Network settings');guest.key('ret');guest.expect('Make this system yours')
             guest.key('ret');guest.accounts();guest.expect('Review and confirm')
             guest.type('usb0');guest.key('ret')
             guest.expect('Barnix is installed!',240)
@@ -26,7 +26,7 @@ for efi in (False, True):
         guest=Guest(directory,[target],setup=False,transport='usb',efi=efi)
         try:
             guest.login_root()
-            guest.command('cat /etc/install.cfg','PROFILE=standard')
+            guest.command('cat /etc/install.cfg','PROFILE=minimal')
             guest.command('devices lsblk','usb0')
             guest.command('write persisted usbboot','program exited: 0')
         finally:

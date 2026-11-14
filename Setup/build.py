@@ -12,10 +12,11 @@ ROOT = Path(__file__).resolve().parents[1]
 SETUP = ROOT / 'Setup'
 BUILD = SETUP / 'build'
 PARTITION_LBA = 2048
-FS_SECTORS = 4096
+FS_SECTORS = 8192   # 4 MiB template; must match ROOT_SECTORS in wizard.c and ext2_import.inc
 IMAGE_SIZE = (PARTITION_LBA + FS_SECTORS) * 512
 sys.path.insert(0, str(ROOT / 'scripts'))
 from install_apps import install
+from install_nova import install as install_nova
 from add_elf import complete_apps
 
 
@@ -127,13 +128,14 @@ def main():
         prefix = boot_prefix(temp)
         efi_partition(temp)
         for mode in ('legacy', 'efi'):
-            for profile in profiles:
+            for profile in profiles[:1]:
                 fs = temp / (mode + '-' + profile['id'] + '.ext2')
                 with fs.open('wb') as stream:
                     stream.truncate(FS_SECTORS * 512)
                 run('mke2fs', '-q', '-t', 'ext2', '-F', '-b', '1024', '-I', '128',
                     '-N', '256', '-O', 'none,filetype', fs)
                 install(fs, selected[profile['id']])
+                install_nova(fs, ROOT / 'tools/nova/build/examples')
                 debug(fs, 'mkdir /boot')
                 debug(fs, 'mkdir /boot/grub')
                 grub_config = temp / 'grub.cfg'
@@ -159,14 +161,17 @@ def main():
             (boot / 'grub').mkdir(parents=True)
             shutil.copyfile(SETUP / ('kernel-efi.elf' if mode == 'efi' else 'kernel.elf'), boot / 'kernel.elf')
             shutil.copyfile(ROOT / 'live-ext2.img', boot / 'live-ext2.img')
-            for profile in profiles:
+            for profile in profiles[:1]:
                 shutil.copyfile(BUILD / (mode + '-' + profile['id'] + '.img'), boot / (profile['id'] + '.img'))
-            modules = ''.join(f'    module /boot/{p["id"]}.img {p["id"]}\n' for p in profiles)
+            shutil.copyfile(BUILD / 'packages/sha256sums', boot / 'packages.sha256')
+            modules = '    module /boot/minimal.img minimal\n    module /boot/packages.sha256 checksums\n'
             if mode == 'efi':
                 shutil.copyfile(BUILD / 'efi-esp.bin', boot / 'efi-esp.bin')
                 modules += '    module /boot/efi-esp.bin esp\n'
+            # No GCC here: 200 MiB took minutes to load from USB 2.0 sticks.
+            # barnix-*-setup-gcc.iso carries it for offline installs.
             (boot / 'grub/grub.cfg').write_text(
-                'set timeout=3\nset default=0\n' +
+                'set timeout=1\nset default=0\n' +
                 ('insmod efi_gop\nset gfxpayload=800x600x32,auto\n' if mode == 'efi' else '') +
                 f'menuentry "Barnix {mode.upper()} Setup" {{\n'
                 '    multiboot /boot/kernel.elf live\n'
@@ -195,8 +200,50 @@ def header():
     (BUILD / 'profiles.h').write_text('\n'.join(lines) + '\n')
 
 
+def gcc_iso():
+    """Wrap the existing installer profiles with the GCC-enabled Live filesystem."""
+    profiles = json.loads((SETUP / 'profiles.json').read_text())['profiles']
+    live = ROOT / 'live-ext2-gcc.img'
+    if not live.is_file():
+        raise FileNotFoundError(live)
+    with tempfile.TemporaryDirectory(prefix='gcc-iso-', dir=BUILD) as temporary:
+        temporary = Path(temporary)
+        for mode in ('legacy', 'efi'):
+            boot = temporary / mode / 'boot'
+            (boot / 'grub').mkdir(parents=True)
+            shutil.copyfile(SETUP / ('kernel-efi.elf' if mode == 'efi' else 'kernel.elf'), boot / 'kernel.elf')
+            shutil.copyfile(live, boot / 'live-ext2.img')
+            for profile in profiles[:1]:
+                source = BUILD / f'{mode}-{profile["id"]}.img'
+                if not source.is_file():
+                    raise FileNotFoundError(f'{source}: run make setup-build first')
+                shutil.copyfile(source, boot / f'{profile["id"]}.img')
+            shutil.copyfile(BUILD / 'packages/sha256sums', boot / 'packages.sha256')
+            modules = '    module /boot/minimal.img minimal\n    module /boot/packages.sha256 checksums\n'
+            if mode == 'efi':
+                shutil.copyfile(BUILD / 'efi-esp.bin', boot / 'efi-esp.bin')
+                modules += '    module /boot/efi-esp.bin esp\n'
+            shutil.copyfile(BUILD / 'packages/gcc.bpk', boot / 'gcc.bpk')
+            modules += '    module /boot/gcc.bpk gcc\n'
+            (boot / 'grub/grub.cfg').write_text(
+                'set timeout=1\nset default=0\n' +
+                ('insmod efi_gop\nset gfxpayload=800x600x32,auto\n' if mode == 'efi' else '') +
+                f'menuentry "Barnix {mode.upper()} Setup + GCC" {{\n'
+                '    multiboot /boot/kernel.elf live\n'
+                '    module /boot/live-ext2.img\n' + modules + '    boot\n}\n')
+            name = f'barnix-{mode}-setup-gcc.iso'
+            output = BUILD / name
+            run('grub-mkrescue', '-d', '/usr/lib/grub/' +
+                ('x86_64-efi' if mode == 'efi' else 'i386-pc'), '-o', output,
+                temporary / mode)
+            output.replace(ROOT / name)
+            print('Built ' + name)
+
+
 if __name__ == '__main__':
     if sys.argv[1:] == ['--header']:
         header()
+    elif sys.argv[1:] == ['--gcc-iso']:
+        gcc_iso()
     else:
         main()

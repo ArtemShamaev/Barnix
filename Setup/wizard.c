@@ -8,26 +8,37 @@
 #include "partition.h"
 #include "permissions.h"
 #include "console_video.h"
+#include "net.h"
+#include "package.h"
 #include "build/profiles.h"
+#include "memory.h"
 
 #define PREFIX_SECTORS 2048U
-#define ROOT_SECTORS 4096U
+#define ROOT_SECTORS 8192U   /* 4 MiB template: Setup/build.py FS_SECTORS, ext2_import.inc */
 #define PAYLOAD_SECTORS (PREFIX_SECTORS + ROOT_SECTORS)
 #ifdef BARNIX_EFI
 #define ESP_SECTORS (64U * 2048U)
 #define SYSTEM_START (PREFIX_SECTORS + ESP_SECTORS)
 #define SETUP_MODULES 5
+#define GCC_MODULE 4
 #define BOOT_LABEL "LiveCD  |  UEFI x64  |  Barnix ext2"
 #else
 #define SYSTEM_START PREFIX_SECTORS
 #define SETUP_MODULES 4
+#define GCC_MODULE 3
 #define BOOT_LABEL "LiveCD  |  Legacy BIOS  |  Barnix ext2"
 #endif
 #define INSTALL_SECTORS (SYSTEM_START + ROOT_SECTORS)
 #define MAX_TARGETS DISK_MAX_DEVICES
 static struct { const char *name; DiskSelection disk; uint64_t capacity; } targets[MAX_TARGETS];
-static int target_count, selected, profile = 1, russian;
+static int target_count, selected, profile, russian;
+static int component_network, component_games, component_gcc, component_cursor;
+static const MultibootInfo *setup_info;
 static char hostname[24] = "barnix";
+static int network_mode; /* 0: offline, 1: Ethernet, 2: Wi-Fi */
+static char wifi_name[33], wifi_password[65];
+static char repository[96] = "http://10.0.2.2:8073";
+static int repository_custom;
 
 // User configuration
 #define MAX_USERS 8
@@ -69,6 +80,32 @@ static unsigned int wizard_key(void) {
     }
 }
 static const char *say(const char *en, const char *ru) { return russian ? ru : en; }
+/* The plain Setup ISO leaves GCC out so it loads fast from slow USB sticks;
+ * the GCC Setup ISO adds it as the last module. */
+static int modules_valid(const MultibootInfo *info)
+{
+    return info && (info->flags & MULTIBOOT_MODULES) &&
+           (info->module_count == SETUP_MODULES || info->module_count == GCC_MODULE);
+}
+static int gcc_module_present(void) { return modules_valid(setup_info) && setup_info->module_count == SETUP_MODULES; }
+static const char *package_hash(const char *name)
+{
+    static char hash[65];
+    if (!modules_valid(setup_info)) return NULL;
+    const MultibootModule *modules = (const MultibootModule *)setup_info->modules;
+    const MultibootModule *manifest = &modules[2];
+    const char *text = (const char *)manifest->start;
+    unsigned int size = manifest->end - manifest->start, name_length = strlen(name);
+    if (manifest->end <= manifest->start || size > 1024) return NULL;
+    for (unsigned int i = 0; i + name_length + 66 <= size; i++) {
+        if (i && text[i - 1] != '\n') continue;
+        if (memcmp(text + i, name, name_length) || text[i + name_length] != ' ') continue;
+        if (text[i + name_length + 65] != '\n') continue;
+        memcpy(hash, text + i + name_length + 1, 64); hash[64] = 0;
+        return hash;
+    }
+    return NULL;
+}
 
 static void rect(int x, int y, int w, int h, unsigned char attr)
 {
@@ -105,12 +142,12 @@ static void frame(int stage, const char *title)
     label(3, 1, 0x1b, SETUP_DISTRIBUTION "  /  SETUP");
     label(3, 2, 0x17, say("A small system. A fresh start.", "Маленькая система. Новое начало."));
     label(25, 5, 0x0f, title);
-    const char *en[] = {"Welcome", "Destination", "Components", "Settings", "Users", "Review", "Install", "Ready"};
-    const char *ru[] = {"Начало", "Выбор диска", "Компоненты", "Настройки", "Пользователи", "Проверка", "Установка", "Готово"};
-    for (int i = 0; i < 8; i++) {
+    const char *en[] = {"Welcome", "Destination", "Components", "Network", "Settings", "Users", "Review", "Install", "Ready"};
+    const char *ru[] = {"Начало", "Выбор диска", "Компоненты", "Сеть", "Настройки", "Пользователи", "Проверка", "Установка", "Готово"};
+    for (int i = 0; i < 9; i++) {
         unsigned char color = i == stage ? 0x3f : i < stage ? 0x1a : 0x18;
-        if (i == stage) rect(2, 5 + i * 2, 20, 1, color);
-        number(3, 5 + i * 2, color, i + 1); label(6, 5 + i * 2, color, russian ? ru[i] : en[i]);
+        if (i == stage) rect(2, 4 + i * 2, 20, 1, color);
+        number(3, 4 + i * 2, color, i + 1); label(6, 4 + i * 2, color, russian ? ru[i] : en[i]);
     }
     label(3,22,0x3f,say("[ Up ]","[Вверх]"));label(13,22,0x3f,say("[ Down ]","[Вниз]"));
     label(43,22,0x3f,say("[ Back / Esc ]","[Назад / Esc]"));label(61,22,0x3f,say("[ Next / Enter ]","[Далее / Enter]"));
@@ -124,7 +161,7 @@ static void option(int row, int active, const char *name)
 }
 static void error_page(const char *en, const char *ru)
 {
-    frame(5, say("Installation did not finish", "Установка не завершена"));
+    frame(6, say("Installation did not finish", "Установка не завершена"));
     label(25, 8, 0x0c, say(en, ru));
     label(25, 11, 0x07, say("The selected disk may contain partial data.", "На выбранном диске могут быть неполные данные."));
     label(25, 13, 0x07, say("Check the disk and retry from the wizard.", "Проверьте диск и повторите установку."));
@@ -179,24 +216,150 @@ static int choose_disk(void)
 }
 static int choose_profile(void)
 {
+    int gcc_available = gcc_module_present() && package_hash("gcc") != NULL &&
+                        targets[selected].disk.sectors >= 1048576U; /* GCC needs room beyond a 128 MiB test disk. */
+    static int default_disk = -1;
+    if (default_disk != selected) { component_gcc = gcc_available; default_disk = selected; }
     for (;;) {
         frame(2, say("Choose what to install", "Что установить?"));
-        for (int i = 0; i < 3; i++) option(8 + i * 2, i == profile, profile_titles[i]);
-        label(25, 15, 0x0b, profile_descriptions[profile]);
-        label(25, 18, 0x08, say("All profiles include kernel and bootloader.", "Во всех вариантах: ядро и загрузчик."));
+        option(8, component_cursor == 0, say("[x] Minimal system", "[x] Минимальная система"));
+        option(10, component_cursor == 1, component_network ? "[x] Network tools, downloads, Git" : "[ ] Network tools, downloads, Git");
+        option(12, component_cursor == 2, component_games ? "[x] Games and example programs" : "[ ] Games and example programs");
+        option(14, component_cursor == 3, gcc_available ?
+             (component_gcc ? "[x] GCC 16 C/C++ (offline)" : "[ ] GCC 16 C/C++ (offline)") :
+               say("[ ] GCC: later from BarnStore", "[ ] GCC: позже из BarnStore"));
+        label(25, 17, 0x0b, say("Space: toggle. Enter: continue.", "Пробел: выбрать. Enter: далее."));
+        if (gcc_module_present())
+            label(25, 19, 0x08, say("GCC is included; network is only for tools and games.",
+                                    "GCC включён в ISO; сеть нужна только для утилит и игр."));
         unsigned int key = wizard_key();
         if (key == KEY_ESCAPE) return 0;
-        if(key>=SETUP_OPTION && key<SETUP_OPTION+3)profile=key-SETUP_OPTION;
-        if (key == KEY_UP && profile) profile--;
-        if (key == KEY_DOWN && profile < 2) profile++;
-        if (key == '\n') return 1;
+        if(key>=SETUP_OPTION && key<SETUP_OPTION+4) { component_cursor=key-SETUP_OPTION; key=' '; }
+        if (key == KEY_UP && component_cursor) component_cursor--;
+        if (key == KEY_DOWN && component_cursor < 3) component_cursor++;
+        if (key == ' ') {
+            if (component_cursor == 1) component_network=!component_network;
+            if (component_cursor == 2) component_games=!component_games;
+            if (component_cursor == 3 && gcc_available) component_gcc=!component_gcc;
+        }
+        profile = component_games ? 2 : component_network ? 1 : 0;
+        if (key == '\n') { if ((component_network || component_games) && !network_mode) network_mode=1; return 1; }
+    }
+}
+static int network_input(const char *title, char *value, int capacity, int secret)
+{
+    keyboard_set_layout(0);
+    for (;;) {
+        frame(3, title);
+        label(25, 8, 0x07, say("Type a value and press Enter; Esc returns.", "Введите значение и нажмите Enter; Esc — назад."));
+        rect(25, 11, 51, 1, 0x30);
+        if (secret) for (int i = 0; value[i] && i < 49; i++) label(26 + i, 11, 0x30, "*");
+        else label(26, 11, 0x30, value);
+        unsigned int key = wizard_key(); int length = strlen(value);
+        if (key == KEY_ESCAPE) return 0;
+        if (key == '\n' && (length || secret)) return 1;
+        if (key == '\b' && length) value[length - 1] = 0;
+        if (key >= ' ' && key <= '~' && length < capacity - 1) {
+            value[length] = (char)key; value[length + 1] = 0;
+        }
+    }
+}
+static int choose_wifi_network(void)
+{
+    char scan[2048];
+    char names[24][33];
+    int secured[24], count = net_scan(scan, sizeof(scan));
+    if (count <= 0) return -1;
+    int found = 0;
+    for (char *line = scan; *line && found < 24;) {
+        char *next = strchr(line, '\n');
+        if (next) *next = 0;
+        char *name = line + (*line == '*' || *line == ' ');   /* net_scan marks each line: '*' current, ' ' other */
+        char *tab = strchr(name, '\t');
+        if (tab) {
+            *tab++ = 0;
+            if (*name && strlen(name) < sizeof(names[0])) {
+                strcpy(names[found], name);
+                secured[found] = strncmp(tab, "open", 4) != 0;
+                found++;
+            }
+        }
+        if (!next) break;
+        line = next + 1;
+    }
+    if (!found) return -1;
+    int selected = 0;
+    for (;;) {
+        frame(3, say("Choose a Wi-Fi network", "Выберите сеть Wi-Fi"));
+        label(25, 7, 0x08, say("Select with arrows, then press Enter", "Выберите стрелками и нажмите Enter"));
+        int first = selected / 6 * 6;
+        for (int i = first; i < found && i < first + 6; i++) {
+            char title[48]; strcpy(title, names[i]);
+            strcat(title, secured[i] ? "  [WPA2]" : "  [open]");
+            option(8 + (i - first) * 2, i == selected, title);
+        }
+        if (found > 6) number(25, 20, 0x08, selected + 1);
+        unsigned int key = wizard_key();
+        if (key == KEY_ESCAPE) return 0;
+        if (key >= SETUP_OPTION && key < SETUP_OPTION + (unsigned int)option_count)
+            selected = first + (int)(key - SETUP_OPTION);
+        if (key == KEY_UP && selected) selected--;
+        if (key == KEY_DOWN && selected + 1 < found) selected++;
+        if (key == '\n' || (key >= SETUP_OPTION && key < SETUP_OPTION + (unsigned int)option_count)) {
+            strcpy(wifi_name, names[selected]);
+            wifi_password[0] = 0;
+            if (secured[selected] && !network_input(say("Wi-Fi password", "Пароль Wi-Fi"), wifi_password, sizeof(wifi_password), 1)) return 0;
+            return 1;
+        }
+    }
+}
+static int network_settings(void)
+{
+    int result = 0;
+    for (;;) {
+        frame(3, say("Network settings", "Настройки сети"));
+        option(8, network_mode == 0, say("Offline (minimal installation)", "Без сети (минимальная установка)"));
+        option(10, network_mode == 1, say("Ethernet / DHCP", "Кабель / DHCP"));
+        option(12, network_mode == 2, say("Wi-Fi / DHCP", "Wi-Fi / DHCP"));
+        label(25, 15, 0x0b, say("W: choose Wi-Fi  R: repository", "W: выбрать Wi-Fi  R: репозиторий"));
+        label(25, 16, 0x07, repository);
+        if (wifi_name[0]) label(25, 18, 0x08, wifi_name);
+        if (result) label(25, 19, 0x0c, say("Connection failed. Check network settings.", "Ошибка подключения. Проверьте настройки сети."));
+        else if (net_state() == NET_CABLE || net_state() == NET_WIFI)
+            label(25, 19, 0x0a, say("Connected. Press Enter to continue.", "Подключено. Enter: далее."));
+        unsigned int key = wizard_key();
+        if (key == KEY_ESCAPE) return 0;
+        if (key >= SETUP_OPTION && key < SETUP_OPTION + 3) network_mode = key - SETUP_OPTION;
+        if (key == KEY_UP && network_mode) network_mode--;
+        if (key == KEY_DOWN && network_mode < 2) network_mode++;
+        if (!repository_custom) strcpy(repository, network_mode == 2 ?
+                                        "http://192.168.77.2:8073" : "http://10.0.2.2:8073");
+        if (key == 's' || key == 'S') { network_mode = 2; result = choose_wifi_network() < 0 ? -1 : 0; }
+        if (key == 'r' || key == 'R') {
+            if (network_input(say("Package repository URL", "Адрес репозитория пакетов"), repository, sizeof(repository), 0)) repository_custom = 1;
+        }
+        if (key == 'w' || key == 'W') {
+            network_mode = 2;
+            if (choose_wifi_network() > 0)
+                result = net_connect_wifi(wifi_name, wifi_password);
+        }
+        if (key == '\n') {
+            if (network_mode == 0) {
+                if (component_network || component_games) { result=-1; continue; }
+                return 1;
+            }
+            if (network_mode == 2 && !wifi_name[0]) choose_wifi_network();
+            result = network_mode == 1 ? net_connect_cable() :
+                wifi_name[0] ? net_connect_wifi(wifi_name, wifi_password) : -1;
+            if (!result) return 1;
+        }
     }
 }
 static int settings(void)
 {
     keyboard_set_layout(0);
     for (;;) {
-        frame(3, say("Make this system yours", "Настройка системы"));
+        frame(4, say("Make this system yours", "Настройка системы"));
         label(25, 8, 0x07, say("Computer name (letters, digits, hyphen):", "Имя компьютера (латиница, цифры, дефис):"));
         rect(25, 10, 40, 1, 0x30); label(26, 10, 0x30, hostname);
         label(25, 13, 0x07, say("Installed language: English", "Язык системы: русский"));
@@ -215,7 +378,7 @@ static int settings(void)
 static int field(const char *title,char *value,int capacity,int secret) {
     value[0]=0;
     for(;;) {
-        frame(4,title);label(25,8,0x07,say("Type a value, then Enter. ESC: back.","Введите значение. Enter: далее. ESC: назад."));
+        frame(5,title);label(25,8,0x07,say("Type a value, then Enter. ESC: back.","Введите значение. Enter: далее. ESC: назад."));
         rect(25,11,51,1,0x30);
         if(secret) { for(int i=0;value[i]&&i<49;i++)label(26+i,11,0x30,"*"); }
         else label(26,11,0x30,value);
@@ -331,9 +494,12 @@ static int review(void)
     char confirm[24] = "";
     keyboard_set_layout(0);
     for (;;) {
-        frame(5, say("Review and confirm", "Проверьте параметры"));
+        frame(6, say("Review and confirm", "Проверьте параметры"));
         label(25, 8, 0x07, say("Destination:", "Диск:")); label(43, 8, 0x0f, targets[selected].name);
-        label(25, 10, 0x07, say("Components:", "Компоненты:")); label(43, 10, 0x0b, profile_titles[profile]);
+        label(25, 9, 0x07, say("Components:", "Компоненты:"));
+        label(43, 9, 0x0b, component_network ? "Network " : "Minimal ");
+        if (component_games) label(55, 9, 0x0b, "Games");
+        if (component_gcc) label(64, 9, 0x0b, "GCC");
         label(25, 11, 0x07, say("Computer:", "Компьютер:")); label(43, 11, 0x0f, hostname);
         label(25, 12, 0x07, say("Language:", "Язык:")); label(43, 12, 0x0f, russian ? "Русский" : "English");
         label(25,14,0x0e,layout_mode==0?say("Erase disk; install bootloader","Стереть диск; установить загрузчик"):say("Format selected root/EFI; replace bootloader","Форматировать root/EFI; заменить загрузчик"));
@@ -350,7 +516,7 @@ static int review(void)
 }
 static void progress(const char *en, const char *ru, unsigned int percent)
 {
-    frame(6, say("Installing your system", "Установка системы"));
+    frame(7, say("Installing your system", "Установка системы"));
     label(25, 9, 0x0b, say(en, ru));
     rect(25, 12, 50, 2, 0x18);
     rect(25, 12, percent / 2, 2, 0x30);
@@ -362,6 +528,49 @@ static void progress(const char *en, const char *ru, unsigned int percent)
 static unsigned char verify_buffer[4096];
 static unsigned int get32le(const unsigned char *p)
 { return p[0] | ((unsigned int)p[1] << 8) | ((unsigned int)p[2] << 16) | ((unsigned int)p[3] << 24); }
+typedef struct { const char *en, *ru; unsigned int start, end, last, last_mib; } PackageProgress;
+static void package_progress(unsigned int processed, unsigned int total, void *context)
+{
+    PackageProgress *state = context;
+    unsigned int step = total / 100;
+    if (!step) step = 1;
+    unsigned int percent = processed / step;
+    if (percent > 100) percent = 100;
+    unsigned int current = state->start + (state->end - state->start) * percent / 100;
+    unsigned int mib = processed / (1024U * 1024U);
+    if (current != state->last || mib != state->last_mib) {
+        state->last = current;
+        state->last_mib = mib;
+        progress(state->en, state->ru, current);
+        label(25, 10, 0x07, say("GCC package:", "Пакет GCC:"));
+        number(38, 10, 0x0f, mib);
+        label(42, 10, 0x07, "/");
+        number(44, 10, 0x0f, total / (1024U * 1024U));
+        label(49, 10, 0x07, say("MiB processed", "МиБ обработано"));
+        console_present();
+    }
+}
+static int install_package(const char *name, const char *en, const char *ru, unsigned int percent)
+{
+    const char *hash = package_hash(name);
+    if (!hash) return -1;
+    progress(en, ru, percent);
+    if (!strcmp(name, "gcc")) {
+        if (!gcc_module_present()) return -1;
+        const MultibootModule *modules = (const MultibootModule *)setup_info->modules;
+        const MultibootModule *module = &modules[GCC_MODULE];
+        if (module->end <= module->start) return -1;
+        PackageProgress state = {"Installing GCC C/C++ offline", "Установка GCC C/C++ без сети", percent, 97, percent, 0xffffffffU};
+        return setup_install_package_memory((const void *)module->start, module->end - module->start,
+                                            hash, package_progress, &state);
+    }
+    char url[160]; strcpy(url, repository);
+    int n = strlen(url);
+    if (!n || n > 120) return -1;
+    if (url[n - 1] != '/') strcat(url, "/");
+    strcat(url, name); strcat(url, ".bpk");
+    return setup_install_package(url, hash);
+}
 #ifdef BARNIX_EFI
 static int patch_boot_slot(unsigned char *bytes,unsigned int size,int slot) {
     int count=0;
@@ -373,16 +582,16 @@ static int patch_boot_slot(unsigned char *bytes,unsigned int size,int slot) {
 #endif
 static int install_image(const MultibootInfo *info)
 {
-    if (!(info->flags & MULTIBOOT_MODULES) || info->module_count != SETUP_MODULES) return -1;
+    if (!modules_valid(info)) return -1;
     const MultibootModule *modules = (const MultibootModule *)info->modules;
-    const MultibootModule *module = &modules[profile + 1];
+    const MultibootModule *module = &modules[1];
     if (module->end <= module->start || module->end - module->start != PAYLOAD_SECTORS * 512) return -1;
     const unsigned char *payload = (const unsigned char *)module->start;
     if (payload[510] != 0x55 || payload[511] != 0xaa || payload[450] != 0x83 ||
         get32le(payload + 454) != PREFIX_SECTORS || get32le(payload + 458) != ROOT_SECTORS ||
         payload[PREFIX_SECTORS * 512 + 1080] != 0x53 || payload[PREFIX_SECTORS * 512 + 1081] != 0xef) return -1;
 #ifdef BARNIX_EFI
-    const MultibootModule *esp_module = &modules[4];
+    const MultibootModule *esp_module = &modules[3];
     if (esp_module->end <= esp_module->start) return -1;
     unsigned int esp_bytes = esp_module->end - esp_module->start;
     const unsigned char *esp = (const unsigned char *)esp_module->start;
@@ -390,6 +599,17 @@ static int install_image(const MultibootInfo *info)
         esp[510] != 0x55 || esp[511] != 0xaa || get32le(esp + 32) != ESP_SECTORS) return -1;
 #endif
     if(!valid_layout())return -1;
+    /* Minecraft Alpha (/mc on the LiveCD, scripts/install_minecraft.py)
+     * goes along: read now, while the LiveCD is the filesystem. */
+    static const char *const game_files[2] = {"/mc/mc.jar", "/mc/mod.jar"};
+    static unsigned char *game_data[2];
+    int game_size[2] = {-1, -1};
+    for (int i = 0; i < 2; i++) {
+        int size = fs_size(game_files[i]);
+        if (size <= 0 || size > (8 << 20)) continue;
+        if (!game_data[i]) game_data[i] = memory_kernel_alloc((unsigned int)size);
+        if (game_data[i] && fs_read(game_files[i], 0, game_data[i], (unsigned int)size) == size) game_size[i] = size;
+    }
 #ifdef BARNIX_EFI
     if(patch_boot_slot((unsigned char *)esp,esp_bytes,root_slot))return -1;
     /* BPB hidden-sector count must match the chosen ESP location. */
@@ -457,9 +677,25 @@ static int install_image(const MultibootInfo *info)
     if (fs_write("/etc/hostname", text, strlen(text))) return -1;
     const char *language = russian ? "LANG=ru\n" : "LANG=en\n";
     if (fs_write("/etc/sys-lang.cfg", language, strlen(language))) return -1;
-    strcpy(text, "PROFILE="); strcat(text, profile_ids[profile]); strcat(text, "\nHOSTNAME=");
+    strcpy(text, "PROFILE="); strcat(text, profile_ids[profile]); strcat(text, "\nCOMPONENTS=minimal");
+    if (component_network) strcat(text, ",network");
+    if (component_games) strcat(text, ",games");
+    if (component_gcc) strcat(text, ",gcc");
+    strcat(text, "\nHOSTNAME=");
     strcat(text, hostname); strcat(text, "\nINSTALLER=Barnix-Setup\n");
     if (fs_write("/etc/install.cfg", text, strlen(text))) return -1;
+    if (component_network && install_package("network", "Downloading network tools", "Загрузка сетевых утилит", 76)) return -2;
+    if (component_games && install_package("games", "Downloading games and examples", "Загрузка игр и примеров", 81)) return -2;
+    if (component_gcc && install_package("gcc", "Downloading GCC C/C++", "Загрузка GCC C/C++", 86)) return -2;
+    /* After the packages, and only with room to spare (a small partition
+     * keeps its space for the system): an installation works without it. */
+    unsigned int free_kib = 0;
+    if (game_size[0] > 0 && !fs_space("/", &free_kib, 0) &&
+        free_kib > (unsigned int)(game_size[0] + (game_size[1] > 0 ? game_size[1] : 0)) / 1024 + 2048) {
+        fs_mkdir("/mc"); fs_mkdir("/mc/minecraft");
+        for (int i = 0; i < 2; i++)
+            if (game_size[i] > 0 && fs_write(game_files[i], (const char *)game_data[i], game_size[i])) fs_rm(game_files[i]);
+    }
     
     if (fs_write("/etc/userpasswd.cfg","",0)) return -1;
     for(int i=0;i<user_count;i++) {
@@ -497,6 +733,7 @@ static void reboot(void)
 }
 void setup_run(const MultibootInfo *info)
 {
+    setup_info = info;
     keyboard_set_layout(0); cursor_off();
     int stage = 0;
     for (;;) {
@@ -513,18 +750,20 @@ void setup_run(const MultibootInfo *info)
             if (key == '\n') stage = 1;
         } else if (stage == 1) stage = choose_disk() ? (choose_layout() ? 2 : 1) : 0;
         else if (stage == 2) stage = choose_profile() ? 3 : 1;
-        else if (stage == 3) stage = settings() ? 4 : 2;
-        else if (stage == 4) stage = configure_users() ? 5 : 3;
-        else if (stage == 5) {
-            if (!review()) { stage = 3; continue; }
+        else if (stage == 3) stage = network_settings() ? 4 : 2;
+        else if (stage == 4) stage = settings() ? 5 : 3;
+        else if (stage == 5) stage = configure_users() ? 6 : 4;
+        else if (stage == 6) {
+            if (!review()) { stage = 4; continue; }
             progress("Preparing installation", "Подготовка установки", 0);
             int result = install_image(info);
             restore_live();
-            if (result) { error_page("Disk write, verification or image check failed.", "Ошибка записи, проверки диска или образа."); stage = 1; continue; }
-            frame(7, say("Barnix is installed!", "Barnix установлен!"));
+            if (result) { error_page(result == -2 ? "Package download or checksum failed." : "Disk write, verification or image check failed.",
+                                     result == -2 ? "Ошибка загрузки или контрольной суммы пакета." : "Ошибка записи, проверки диска или образа."); stage = 1; continue; }
+            frame(8, say("Barnix is installed!", "Barnix установлен!"));
             label(25, 8, 0x0a, say("Installation completed and verified.", "Установка завершена, данные проверены."));
             label(25, 10, 0x07, say("Disk:", "Диск:")); label(35, 10, 0x0f, targets[selected].name);
-            label(25, 11, 0x07, say("Profile:", "Вариант:")); label(35, 11, 0x0b, profile_titles[profile]);
+            label(25, 11, 0x07, say("Components:", "Компоненты:")); label(38, 11, 0x0b, profile_titles[profile]);
             label(25, 14, 0x0e, say("Remove the CD and boot the selected disk.", "Извлеките CD и загрузитесь с выбранного диска."));
             label(25, 17, 0x0f, say("ENTER: reboot    ESC: return to LiveCD shell", "ENTER: перезагрузка    ESC: оболочка LiveCD"));
             for (;;) { unsigned int key = wizard_key(); if (key == '\n') reboot(); if (key == KEY_ESCAPE) { cursor_on(); return; } }

@@ -48,7 +48,7 @@ with tempfile.TemporaryDirectory(prefix='barnix-setup-pci-') as temporary:
             guest.expect('Welcome to Barnix Setup')
             guest.key('ret'); guest.expect(name)
             guest.key('ret'); guest.expect('Partitioning mode'); guest.key('ret'); guest.expect('Choose what to install')
-            guest.key('ret'); guest.expect('Make this system yours')
+            guest.key('ret'); guest.expect('Network settings'); guest.key('ret'); guest.expect('Make this system yours')
             guest.key('ret'); guest.accounts(); guest.expect('Review and confirm')
             guest.type(name); guest.key('ret')
             guest.expect('Barnix is installed!', timeout=180)
@@ -63,7 +63,7 @@ with tempfile.TemporaryDirectory(prefix='barnix-setup-pci-') as temporary:
         guest = Guest(directory, [target], setup=False, transport=transport)
         try:
             guest.login_root()
-            guest.command('cat /etc/install.cfg', 'PROFILE=standard')
+            guest.command('cat /etc/install.cfg', 'PROFILE=minimal')
             guest.command('devices lsblk', name)
             guest.command('write persisted yes', 'program exited: 0')
         finally:
