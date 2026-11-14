@@ -16,10 +16,10 @@ static void place_food(void) {
 }
 static void step(void) {
     Point head={body[0].x+dx,body[0].y+dy};
-    if(head.x<0||head.x>=W||head.y<0||head.y>=H){done=1;return;}
+    if(head.x<0||head.x>=W||head.y<0||head.y>=H){done=1;game_sound(ARC_DIE,110);return;}
     int eat=head.x==food.x&&head.y==food.y;
-    for(int i=0;i<length-!eat;i++)if(body[i].x==head.x&&body[i].y==head.y){done=1;return;}
-    if(eat){length++;score++;}
+    for(int i=0;i<length-!eat;i++)if(body[i].x==head.x&&body[i].y==head.y){done=1;game_sound(ARC_DIE,110);return;}
+    if(eat){length++;score++;game_sound(ARC_EAT,880);}
     else cell(body[length-1].x+21,body[length-1].y+3,' ',15);
     cell(body[0].x+21,body[0].y+3,'o',10);
     for(int i=length-1;i>0;i--)body[i]=body[i-1];

@@ -35,7 +35,7 @@ int argument_int(int index, int *value)
 }
 static int decimal(int value, char *out)
 {
-    unsigned int n = value < 0 ? (unsigned int)(-value) : (unsigned int)value;
+    unsigned int n = value < 0 ? 0U - (unsigned int)value : (unsigned int)value;
     int p = 0;
     if (value < 0) out[p++] = '-';
     char reverse[12]; int count = 0;
@@ -86,7 +86,14 @@ int fputc(int character,FILE *stream) {
 int fputs(const char *text,FILE *stream) {if(!text)return EOF;int n=0;while(text[n]){if(fputc((unsigned char)text[n],stream)==EOF)return EOF;n++;}return n;}
 int fgetc(FILE *stream) {unsigned char value;return barnix_fread(&value,1,1,stream)==1?value:EOF;}
 int fflush(FILE *stream) {(void)stream;return 0;}
-int feof(FILE *stream) {return !stream||!stream->name;}
+/* The end is where the position meets the file's size: a `while (!feof(f))`
+ * loop must finish (there is no separate end-of-file flag in FILE). */
+int feof(FILE *stream) {
+    if(!stream||!stream->name)return 1;
+    if(stream==stdin||stream==stdout||stream==stderr)return 0;
+    int size=barnix->size(stream->name);
+    return size<0||stream->position>=(unsigned int)size;
+}
 int ferror(FILE *stream) {(void)stream;return 0;}
 int fseek(FILE *stream,long offset,int origin) {
     if(!stream||!stream->name||offset<0)return -1;

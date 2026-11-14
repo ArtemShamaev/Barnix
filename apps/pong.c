@@ -24,10 +24,10 @@ int main(int argc,const char *const *argv) {
                 /* AI moves on alternating ball columns: beatable, no teleporting. */
                 if(!two&&!(x&1)&&dx>0){if(y<right+1)right--;else if(y>right+2)right++;right=clamp(right);}
                 int nx=x+dx,ny=y+dy;
-                if(ny<2||ny>20){dy=-dy;ny=y+dy;}
-                if(nx==4&&dx<0&&ny>=left&&ny<left+4){dx=1;nx=5;dy=ny<left+2?-1:1;}
-                if(nx==75&&dx>0&&ny>=right&&ny<right+4){dx=-1;nx=74;dy=ny<right+2?-1:1;}
-                if(nx<=2||nx>=77){if(nx<=2)b++;else a++;nx=40;ny=10;dx=-dx;dy=1;}
+                if(ny<2||ny>20){dy=-dy;ny=y+dy;game_sound(ARC_HIT,330);}
+                if(nx==4&&dx<0&&ny>=left&&ny<left+4){dx=1;nx=5;dy=ny<left+2?-1:1;game_sound(ARC_HIT,660);}
+                if(nx==75&&dx>0&&ny>=right&&ny<right+4){dx=-1;nx=74;dy=ny<right+2?-1:1;game_sound(ARC_HIT,660);}
+                if(nx<=2||nx>=77){if(nx<=2)b++;else a++;nx=40;ny=10;dx=-dx;dy=1;game_sound(ARC_SCORE,220);}
                 x=nx;y=ny;
             }
         }

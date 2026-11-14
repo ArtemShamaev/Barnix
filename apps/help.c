@@ -29,12 +29,12 @@ int main(int argc, const char *const *argv)
     barnix->println(15, barnix->translate("panic       - crash system"));
     barnix->println(15, barnix->translate("init        - reload system configuration"));
     barnix->println(15, barnix->translate("Shift+Alt   - switch EN/RU keyboard layout"));
-    barnix->println(15, barnix->translate("bnm connect WIFI_NAME - connect to Wi-Fi"));
-    barnix->println(15, barnix->translate("bnm internet - connect by cable"));
-    barnix->println(15, barnix->translate("bnm get-networks - list Wi-Fi networks"));
-    barnix->println(15, barnix->translate("bnm test-ping - test Internet latency"));
-    barnix->println(15, barnix->translate("get URL [FILE] - download a file"));
-    barnix->println(15, barnix->translate("git clone URL - clone a repository"));
+    barnix->println(15, barnix->translate("Ctrl+Alt+M  - keyboard mouse: arrows move, Space/Enter click, Shift+Space right"));
+    barnix->println(15, barnix->translate("bnm [internet | connect WIFI [PASSWORD] | get-networks | off] - network"));
+    barnix->println(15, barnix->translate("bnm test-ping [HOST] - ping; bnm resolve HOST - look up an address"));
+    barnix->println(15, barnix->translate("get URL [FILE] - download over HTTP or HTTPS"));
+    barnix->println(15, barnix->translate("git clone URL [DIR] - fetch the newest commit of a repository"));
+    barnix->println(15, barnix->translate("brm -S NAME - install a program from the repository; brm -h - all options"));
     barnix->println(15, barnix->translate("cmd | cmd   - pipe two Linux commands"));
     barnix->println(15, barnix->translate("< > >>      - Linux input / output / append"));
     barnix->println(15, barnix->translate("Quotes keep spaces and operators in arguments"));
@@ -47,5 +47,9 @@ int main(int argc, const char *const *argv)
     barnix->puts("snake; pong [1|2]; fdisk DEVICE list (run fdisk for usage)");
     barnix->puts("Partitions: ata0p1..ata0p4, disk2p1, etc.");
     barnix->puts("paint [FILE.bmp] - mouse pixel-art editor, palette, fill, undo, BMP");
+    barnix->puts("barnocraft - voxel sandbox: WASD, mouse/arrows, X/C break/place, E inventory");
+    barnix->puts("gouse - Happy Gouse windowed environment: apps, games, many windows at once");
+    barnix->puts("play [file.wav] - play a WAV file, or a fanfare; beep [hz] [ms] - PC speaker tone");
+    barnix->puts("sounds [on|off] - shell sounds (login chime, error tone)");
     return 0;
 }

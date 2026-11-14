@@ -99,6 +99,10 @@ static void draw_line(unsigned int p, int row, int current)
 }
 static void draw(void)
 {
+    /* Keep the cursor's line on the screen (after typing, a match, a paste). */
+    unsigned int current = line_number(position);
+    if (top > length || current < line_number(top)) top = line_start(position);
+    else if (current >= line_number(top) + EDITOR_LINES) top = start_of_line_number(current - EDITOR_LINES + 1);
     barnix->clear();
     barnix->goto_xy(0, 0); barnix->print(11, "Barnino System(s) Macro text editor");
     barnix->goto_xy(0, 1); barnix->print(15, "File: "); barnix->print(15, filename);
@@ -112,7 +116,7 @@ static void draw(void)
     clear_row(STATUS_ROW); barnix->goto_xy(0, STATUS_ROW);
     barnix->print(status ? 12 : 7, status ? status : "Ready");
     clear_row(HELP_ROW); barnix->goto_xy(0, HELP_ROW);
-    barnix->print(15, "^S Save   ^Q Quit   ^F Find   Arrows Move   Backspace Delete");
+    barnix->print(15, "^S Save  ^Q Quit  ^F Find  ^C Copy line  ^X Cut line  ^V Paste");
     unsigned int row = line_number(position) - line_number(top);
     unsigned int x = column(position);
     if (row >= EDITOR_LINES) row = EDITOR_LINES - 1;
@@ -136,8 +140,11 @@ static int find_text(void)
     }
     scratch[n] = 0;
     if (!n) { status = "Find cancelled"; draw(); return 0; }
-    for (unsigned int i = position; i + n <= length; i++)
-        if (!memcmp(document + i, scratch, n)) { position = i; status = "Match found"; draw(); return 1; }
+    /* From after the cursor, then around from the top: repeating ^F walks the matches. */
+    for (unsigned int k = 1; k <= length; k++) {
+        unsigned int i = (position + k) % length;
+        if (i + n <= length && !memcmp(document + i, scratch, n)) { position = i; status = "Match found"; draw(); return 1; }
+    }
     status = "Text not found"; draw(); return 0;
 }
 int main(int argc, const char *const *argv)
@@ -154,6 +161,24 @@ int main(int argc, const char *const *argv)
         if (key == 19) { if (barnix->write(filename, document, (int)length)) status = "Save failed"; else status = "Saved"; continue; }
         if (key == 17) return 0;
         if (key == 6) { find_text(); continue; }
+        /* The system clipboard: the current line, or what another program copied. */
+        if (key == 3 || key == 24) {
+            unsigned int from = line_start(position), to = line_end(position);
+            if (to < length) to++;   /* with its newline */
+            barnix->clipboard_set(document + from, to - from);
+            if (key == 24) { remove_bytes(from, to - from); position = from; status = "Line cut"; }
+            else status = "Line copied";
+            continue;
+        }
+        if (key == 22) {
+            static char pasted[EDITOR_BYTES];
+            int n = barnix->clipboard_get(pasted, sizeof(pasted));
+            if (n > (int)sizeof(pasted) - 1) n = (int)sizeof(pasted) - 1;
+            if (n <= 0) { status = "The clipboard is empty"; continue; }
+            if (length + (unsigned int)n > EDITOR_BYTES) { status = "No room for the clipboard"; continue; }
+            insert_bytes(position, pasted, (unsigned int)n);
+            continue;
+        }
         if (key == KEY_LEFT) position = previous_char(position);
         else if (key == KEY_RIGHT) position = next_char(position);
         else if (key == KEY_HOME) position = line_start(position);
@@ -164,14 +189,11 @@ int main(int argc, const char *const *argv)
             if (key == KEY_UP && target) target--; else if (key == KEY_DOWN) target++;
             unsigned int begin = start_of_line_number(target);
             position = position_at_column(begin, col);
-        } else if (key == 0x08) position = previous_char(position), remove_bytes(position, next_char(position) - position);
+        } else if (key == 0x08) { if (position) position = previous_char(position), remove_bytes(position, next_char(position) - position); }
         else if (key == KEY_DELETE) remove_bytes(position, next_char(position) - position);
         else if (key == '\n') insert_bytes(position, "\n", 1);
         else if (key >= 32 && key != 127) {
             char encoded[4]; unsigned int n = utf8_encode(key, encoded); insert_bytes(position, encoded, n);
         }
-        unsigned int current = line_number(position);
-        if (current < line_number(top)) top = line_start(position);
-        else if (current >= line_number(top) + EDITOR_LINES) top = start_of_line_number(current - EDITOR_LINES + 1);
     }
 }

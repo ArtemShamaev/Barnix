@@ -209,7 +209,7 @@ int main(int argc,const char *const *argv) {
         }
         if(action==ID_FILES||action==ID_OPEN){if(open_selected())return 0;}
         else if(action==ID_UP)change_directory("..");
-        else if(action==ID_PROGRAMS)change_directory("/bin");
+        else if(action==ID_PROGRAMS)change_directory("/usr/bin");
         else if(action==ID_HOME){char home[256];copy(home,"/home/",sizeof(home));append(home,barnix->current_user(),sizeof(home));change_directory(home);}
         else if(action==ID_REFRESH){Entry *entry=selected();refresh(entry?entry->name:0);}
         else if(action==ID_VIEW)view_file();

@@ -37,7 +37,8 @@ int main(void)
                 return 1;
             }
 
-            result = num1 / num2;
+            /* INT_MIN / -1 does not fit: the processor would raise a fault. */
+            result = num2 == -1 ? (int)(0U - (unsigned int)num1) : num1 / num2;
             break;
 
         case '%':
@@ -46,7 +47,7 @@ int main(void)
                 return 1;
             }
 
-            result = num1 % num2;
+            result = num2 == -1 ? 0 : num1 % num2;
             break;
 
         default:
