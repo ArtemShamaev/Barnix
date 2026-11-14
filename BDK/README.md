@@ -288,7 +288,7 @@ int main(void) {
 
 `<barnix_opengl.h>` подключает стандартные `<GL/gl.h>`, `<GL/glu.h>` и
 `<math.h>`. Это программная реализация OpenGL 1.1 (как Mesa/TinyGL):
-геометрия считается на FPU x87, а треугольники растеризуются полосами
+геометрия считается в регистрах SSE2, а треугольники растеризуются полосами
 сразу на всех ядрах процессора (`bgx_parallel`). Обычный код OpenGL
 переносится почти без изменений — заменяется только создание окна.
 
@@ -335,9 +335,9 @@ OpenGL-программе выделяйте память через `bxgl_alloc
 `bxgl_context` рисует во внешние буферы без экрана. Пример —
 `examples/glcube.c`; в Barnix есть демо `gldemo`.
 
-Начиная с этой версии BDK компилирует `float` и `double` на FPU x87
-(раньше был `-msoft-float`, и программы с плавающей точкой не компоновались);
-`start.c` включает FPU перед `main`. `<math.h>` даёт `sinf/cosf/sqrtf/powf`
+BDK компилирует `float` и `double` в инструкции SSE2 (`-march=pentium4
+-mfpmath=sse`, как требует и Windows 10): нужен процессор Pentium 4 / Athlon 64
+или новее. `start.c` включает FPU и SSE перед `main`. `<math.h>` даёт `sinf/cosf/sqrtf/powf`
 и остальные функции в вариантах float и double.
 
 ## Barnix Sound (BSND): звук

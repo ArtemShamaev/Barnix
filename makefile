@@ -81,7 +81,10 @@ rebuild:
 	$(MAKE) clean
 	$(MAKE) all
 
-APP_CFLAGS = -m32 -march=i386 -mno-sse -mno-mmx -msoft-float -O2 -ffreestanding -fno-pie -fno-pic -fno-stack-protector -U_FORTIFY_SOURCE -Wall -Wextra $(INCLUDES) -Iapps -Ibarnixiolib
+# Programs use SSE2 for float/double (as Windows 10 requires): Pentium 4 /
+# Athlon 64 or newer. The kernel itself stays integer-only.
+APP_FP = -march=pentium4 -mfpmath=sse
+APP_CFLAGS = -m32 $(APP_FP) -O2 -ffreestanding -fno-pie -fno-pic -fno-stack-protector -U_FORTIFY_SOURCE -Wall -Wextra $(INCLUDES) -Iapps -Ibarnixiolib
 LINUX_COMMANDS = echo pwd cat ls touch write append cp true false
 COMMANDS = beep play df diskinfo devices clear rm mkdir cd rmdir stat mv panic sync mount format unmount help init macro bnm get git brm chmod su sudo whoami useradd theme snake pong fdisk paint execute bcc barnocraft gouse gldemo glrunner java nova
 APPS = apps/hello.elf apps/fileio.elf apps/theme.elf apps/snake.elf apps/asciiart.elf apps/excuse.elf apps/fortune.elf apps/pong.elf $(addprefix apps/bin/,$(sort $(COMMANDS) $(LINUX_COMMANDS)))
@@ -124,9 +127,9 @@ apps/arcade_sounds.h: $(wildcard sounds/arc_*.wav) scripts/sound_assets.py
 drivers/sound/system_sounds.h: $(wildcard sounds/sys_*.wav) scripts/sound_assets.py
 	python3 scripts/sound_assets.py $@ sys $(call sound_args,sys)
 BARNOCRAFT_CORE = apps/barnocraft_game.c apps/barnocraft_game.h apps/barnocraft_assets.h apps/barnocraft_sounds.h
-# The raycaster runs per pixel: i686 (cmov, Pentium Pro and later) and -O3.
+# The raycaster runs per pixel: -O3 on top of the SSE2 program flags.
 apps/barnocraft_game.o: $(BARNOCRAFT_CORE) BDK/include/barnix_gfx.h BDK/include/barnix_sound.h include/abi/app_abi.h include/abi/audio.h makefile
-	$(CC) $(APP_CFLAGS) -O3 -march=i686 -DBARNIX_IN_TREE -IBDK/include -c apps/barnocraft_game.c -o $@
+	$(CC) $(APP_CFLAGS) -O3 -DBARNIX_IN_TREE -IBDK/include -c apps/barnocraft_game.c -o $@
 APP_GFX_DEPS = apps/command.h apps/start.c apps/runtime.c kernel/text.c BDK/runtime/gfx.c BDK/runtime/sound.c BDK/include/barnix_gfx.h BDK/include/barnix_sound.h include/abi/audio.h BDK/include/barnix_api.h apps/barnix_app.h include/abi/app_abi.h include/abi/keyboard.h include/abi/mouse.h apps/app.ld scripts/mark_barnix_elf.py makefile
 # Sound commands use the BDK Barnix Sound library.
 APP_SOUND_DEPS = apps/command.h apps/start.c apps/runtime.c kernel/text.c BDK/runtime/sound.c BDK/include/barnix_sound.h BDK/include/barnix_api.h apps/barnix_app.h include/abi/app_abi.h include/abi/audio.h apps/app.ld scripts/mark_barnix_elf.py makefile
@@ -152,18 +155,17 @@ apps/bin/snake apps/bin/pong: apps/bin/%: apps/%.c apps/game.h apps/arcade_sound
 	$(CC) $(APP_CFLAGS) -DBARNIX_IN_TREE -IBDK/include -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-T,apps/app.ld apps/start.c apps/runtime.c kernel/text.c BDK/runtime/sound.c $< -o $@
 	python3 scripts/mark_barnix_elf.py $@
 
-# Barnix OpenGL: the BDK software OpenGL 1.1 on the x87 FPU (-mhard-float
-# overrides the soft-float default of in-tree programs), i686 for fcomi/fcmov.
+# Barnix OpenGL: the BDK software OpenGL 1.1, float math in SSE2 registers.
 BXGL_RUNTIME = BDK/runtime/gl.c BDK/runtime/gl_raster.c BDK/runtime/glu.c BDK/runtime/math.c
 BXGL_DEPS = $(BXGL_RUNTIME) BDK/runtime/gl_internal.h BDK/include/GL/gl.h BDK/include/GL/glu.h BDK/include/barnix_opengl.h BDK/include/math.h
 apps/bin/gldemo: apps/gldemo.c $(BXGL_DEPS) $(APP_GFX_DEPS)
 	mkdir -p apps/bin
-	$(CC) $(APP_CFLAGS) -mhard-float -march=i686 -DBARNIX_IN_TREE -IBDK/include -IBDK/runtime -nostdlib -static -no-pie -Wl,--build-id=none -Wl,--gc-sections -Wl,-T,apps/app.ld -ffunction-sections -fdata-sections apps/start.c apps/runtime.c kernel/text.c BDK/runtime/gfx.c $(BXGL_RUNTIME) $< -o $@
+	$(CC) $(APP_CFLAGS) -DBARNIX_IN_TREE -IBDK/include -IBDK/runtime -nostdlib -static -no-pie -Wl,--build-id=none -Wl,--gc-sections -Wl,-T,apps/app.ld -ffunction-sections -fdata-sections apps/start.c apps/runtime.c kernel/text.c BDK/runtime/gfx.c $(BXGL_RUNTIME) $< -o $@
 	python3 scripts/mark_barnix_elf.py $@
 
 apps/bin/glrunner: apps/glrunner.c $(BXGL_DEPS) $(APP_GFX_DEPS)
 	mkdir -p apps/bin
-	$(CC) $(APP_CFLAGS) -mhard-float -march=i686 -DBARNIX_IN_TREE -IBDK/include -IBDK/runtime -nostdlib -static -no-pie -Wl,--build-id=none -Wl,--gc-sections -Wl,-T,apps/app.ld -ffunction-sections -fdata-sections apps/start.c apps/runtime.c kernel/text.c BDK/runtime/gfx.c BDK/runtime/sound.c $(BXGL_RUNTIME) $< -o $@
+	$(CC) $(APP_CFLAGS) -DBARNIX_IN_TREE -IBDK/include -IBDK/runtime -nostdlib -static -no-pie -Wl,--build-id=none -Wl,--gc-sections -Wl,-T,apps/app.ld -ffunction-sections -fdata-sections apps/start.c apps/runtime.c kernel/text.c BDK/runtime/gfx.c BDK/runtime/sound.c $(BXGL_RUNTIME) $< -o $@
 	python3 scripts/mark_barnix_elf.py $@
 
 # BJVM: a Java 8 virtual machine with LWJGL 2 on Barnix OpenGL. The class
@@ -179,7 +181,7 @@ $(JAVA_DIR)/natives_gl.c: $(JAVA_DIR)/tools/gen_gl.py $(JAVA_DIR)/tools/gl_ext.p
 	python3 $(JAVA_DIR)/tools/gen_gl.py
 apps/bin/java: $(JAVA_SOURCES) $(JAVA_DIR)/jvm.h $(JAVA_DIR)/lwjgl_gl.h $(JAVA_DIR)/rt.S $(JAVA_DIR)/obj/rt.jar BDK/runtime/inflate.c $(BXGL_DEPS) $(APP_GFX_DEPS)
 	mkdir -p apps/bin
-	$(CC) $(APP_CFLAGS) -mhard-float -march=i686 -DBARNIX_IN_TREE -IBDK/include -IBDK/runtime -I$(JAVA_DIR) -DRT_JAR='"$(JAVA_DIR)/obj/rt.jar"' -Wno-unused-parameter -Wno-override-init -nostdlib -static -no-pie -Wl,--build-id=none -Wl,--gc-sections -Wl,-T,apps/app.ld -ffunction-sections -fdata-sections apps/start.c apps/runtime.c kernel/text.c BDK/runtime/gfx.c BDK/runtime/inflate.c $(BXGL_RUNTIME) $(JAVA_SOURCES) $(JAVA_DIR)/rt.S -lgcc -o $@
+	$(CC) $(APP_CFLAGS) -DBARNIX_IN_TREE -IBDK/include -IBDK/runtime -I$(JAVA_DIR) -DRT_JAR='"$(JAVA_DIR)/obj/rt.jar"' -Wno-unused-parameter -Wno-override-init -nostdlib -static -no-pie -Wl,--build-id=none -Wl,--gc-sections -Wl,-T,apps/app.ld -ffunction-sections -fdata-sections apps/start.c apps/runtime.c kernel/text.c BDK/runtime/gfx.c BDK/runtime/inflate.c $(BXGL_RUNTIME) $(JAVA_SOURCES) $(JAVA_DIR)/rt.S -lgcc -o $@
 	python3 scripts/mark_barnix_elf.py $@
 
 # Nova is a host-side compiler. Its Java 8 output runs on BJVM in Barnix.
@@ -208,9 +210,9 @@ apps/bin/barnocraft: apps/barnocraft.c apps/barnocraft_game.o $(BARNOCRAFT_CORE)
 GOUSE_WEB_SOURCES = $(wildcard apps/gouse/web_*.c) apps/gouse/app_browser.c
 GOUSE_WEB_OBJECTS = $(patsubst apps/gouse/%.c,apps/gouse/obj/%.o,$(GOUSE_WEB_SOURCES))
 GOUSE_SOURCES = $(filter-out apps/gouse/js_platform.c $(GOUSE_WEB_SOURCES),$(wildcard apps/gouse/*.c))
-# QuickJS is built with x87 and a pinned, freestanding musl support archive.
+# QuickJS is built with SSE2 math and a pinned, freestanding musl support archive.
 WEB_LIBC = apps/gouse/obj/musl/lib/libc.a
-WEB_JS_FLAGS = -m32 -march=i386 -mno-sse -mno-mmx -mfpmath=387 -Os -ffreestanding -fno-pie -fno-pic -fno-stack-protector -U_FORTIFY_SOURCE -ffunction-sections -fdata-sections -D_GNU_SOURCE -DBARNIX_JS -DCONFIG_VERSION='"2025-09-13"' -nostdinc -isystem apps/gouse/obj/musl/obj/include -isystem apps/gouse/obj/musl/include -isystem apps/gouse/obj/musl/arch/i386 -isystem apps/gouse/obj/musl/arch/generic -isystem $(shell $(CC) -print-file-name=include)
+WEB_JS_FLAGS = -m32 $(APP_FP) -Os -ffreestanding -fno-pie -fno-pic -fno-stack-protector -U_FORTIFY_SOURCE -ffunction-sections -fdata-sections -D_GNU_SOURCE -DBARNIX_JS -DCONFIG_VERSION='"2025-09-13"' -nostdinc -isystem apps/gouse/obj/musl/obj/include -isystem apps/gouse/obj/musl/include -isystem apps/gouse/obj/musl/arch/i386 -isystem apps/gouse/obj/musl/arch/generic -isystem $(shell $(CC) -print-file-name=include)
 WEB_JS_NAMES = quickjs dtoa libregexp libunicode cutils
 WEB_JS_HOST_OBJECTS = $(addprefix apps/gouse/obj/host_,$(addsuffix .o,$(WEB_JS_NAMES)))
 apps/gouse/obj/host_%.o: apps/gouse/vendor/quickjs/%.c
@@ -245,7 +247,7 @@ apps/bin/%.elf: apps/%.elf makefile
 	mkdir -p apps/bin
 	cp $< $@
 
-USER_CFLAGS = -m32 -march=i386 -mno-sse -mno-mmx -msoft-float -O2 -ffreestanding -fno-pie -fno-pic -fno-stack-protector -U_FORTIFY_SOURCE -Wall -Wextra
+USER_CFLAGS = -m32 $(APP_FP) -O2 -ffreestanding -fno-pie -fno-pic -fno-stack-protector -U_FORTIFY_SOURCE -Wall -Wextra
 
 $(addprefix apps/bin/,$(LINUX_COMMANDS)): apps/bin/%: userland/commands.c userland/start.S userland/syscall.h include/uapi/unistd.h makefile
 	mkdir -p apps/bin

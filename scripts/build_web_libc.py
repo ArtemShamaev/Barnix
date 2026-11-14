@@ -28,5 +28,5 @@ for n in range(7):
 s += '#define VDSO_USEFUL 0\n'
 p.write_text(s)
 subprocess.run(['./configure', '--target=i386', '--disable-shared',
-                'CC=gcc -m32', 'AR=ar', 'RANLIB=ranlib', 'CFLAGS=-Os -march=i386 -mno-sse -mno-mmx -mfpmath=387 -fno-pie -fno-stack-protector -ffunction-sections -fdata-sections'], cwd=out, check=True)
+                'CC=gcc -m32', 'AR=ar', 'RANLIB=ranlib', 'CFLAGS=-Os -march=pentium4 -mfpmath=sse -fno-pie -fno-stack-protector -ffunction-sections -fdata-sections'], cwd=out, check=True)
 subprocess.run(['make', '-j4', 'lib/libc.a'], cwd=out, check=True)

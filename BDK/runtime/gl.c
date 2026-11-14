@@ -1915,7 +1915,7 @@ const GLubyte *glGetString(GLenum name)
             "GL_EXT_blend_func_separate GL_EXT_draw_range_elements GL_EXT_multi_draw_arrays GL_SGIS_generate_mipmap "
             "GL_EXT_texture_env_add GL_EXT_packed_pixels GL_EXT_rescale_normal";
     case GL_RENDERER: {
-        const char *prefix = "Barnix SoftGL x87, cores: ";
+        const char *prefix = "Barnix SoftGL SSE2, cores: ";
         int i = 0;
         while (prefix[i]) { renderer[i] = prefix[i]; i++; }
         unsigned int cpus = bgx_cpus();

@@ -86,3 +86,5 @@ tests/gl/
 /build/
 /BDK/tools/csharp/bin/
 /BDK/tools/csharp/obj/
+/kernel64.elf
+/barnix64.iso

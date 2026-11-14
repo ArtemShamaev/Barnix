@@ -1,7 +1,12 @@
 #include <math.h>
-/* <math.h> on x87 instructions. The FPU computes in extended precision, so
+/* <math.h> on x87 instructions (sqrt and fabs use SSE2 when available). The FPU computes in extended precision, so
  * these are accurate to the last bit of double for ordinary arguments. */
+#ifdef __SSE2_MATH__
+/* SSE2 builds: square root and absolute value stay in XMM registers. */
+double sqrt(double x) { double r; __asm__("sqrtsd %1, %0" : "=x"(r) : "x"(x)); return r; }
+#else
 double sqrt(double x) { double r; __asm__("fsqrt" : "=t"(r) : "0"(x)); return r; }
+#endif
 double sin(double x) { double r; __asm__("fsin" : "=t"(r) : "0"(x)); return r; }
 double cos(double x) { double r; __asm__("fcos" : "=t"(r) : "0"(x)); return r; }
 double tan(double x) { double r; __asm__("fptan; fstp %%st(0)" : "=t"(r) : "0"(x)); return r; }
@@ -9,7 +14,11 @@ double atan2(double y, double x) { double r; __asm__("fpatan" : "=t"(r) : "0"(x)
 double atan(double x) { return atan2(x, 1.0); }
 double asin(double x) { return atan2(x, sqrt((1.0 - x) * (1.0 + x))); }
 double acos(double x) { return atan2(sqrt((1.0 - x) * (1.0 + x)), x); }
+#ifdef __SSE2_MATH__
+double fabs(double x) { return __builtin_fabs(x); }
+#else
 double fabs(double x) { double r; __asm__("fabs" : "=t"(r) : "0"(x)); return r; }
+#endif
 double rint(double x) { double r; __asm__("frndint" : "=t"(r) : "0"(x)); return r; }
 double floor(double x) { double r = rint(x); return r > x ? r - 1.0 : r; }
 double ceil(double x) { double r = rint(x); return r < x ? r + 1.0 : r; }
@@ -85,7 +94,11 @@ double remainder(double x, double y)
 }
 double copysign(double x, double y) { return signbit(x) == signbit(y) ? x : -x; }
 
+#ifdef __SSE2_MATH__
+float sqrtf(float x) { float r; __asm__("sqrtss %1, %0" : "=x"(r) : "x"(x)); return r; }
+#else
 float sqrtf(float x) { return (float)sqrt(x); }
+#endif
 float sinf(float x) { return (float)sin(x); }
 float cosf(float x) { return (float)cos(x); }
 float tanf(float x) { return (float)tan(x); }
