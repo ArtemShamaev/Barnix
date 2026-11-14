@@ -28,7 +28,7 @@ def main():
         # exclusively to the freestanding SDK include directory.
         include = args.include_dir.expanduser().resolve()
         include.mkdir(parents=True, exist_ok=True)
-        for name in ('barnix_api.h', 'barnix_api', 'barnix_graphics.h', 'barnix_graphics'):
+        for name in ('barnix_api.h', 'barnix_api', 'barnix_graphics.h', 'barnix_graphics', 'barnix_gfx.h', 'barnix_sound.h'):
             shutil.copy2(source / 'sdk/include' / name, include / name)
         shutil.copytree(source / 'sdk/include/barnix', include / 'barnix', dirs_exist_ok=True)
     packages = list(source.glob('Barnino.Systems.BDK.Templates.*.nupkg'))

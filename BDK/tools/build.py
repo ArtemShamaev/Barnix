@@ -32,8 +32,9 @@ def build(project, native_sources=None):
     cc = os.environ.get('CC', 'clang' if os.name == 'nt' else 'gcc')
     cxx = os.environ.get('CXX', 'clang++' if os.name == 'nt' else 'g++')
     clang = 'clang' in run([cc, '--version'], capture_output=True, text=True).stdout.lower()
-    flags = ['-m32', '-march=i386', '-mno-sse', '-mno-mmx', '-msoft-float', '-O2',
-             '-fwrapv', '-ffreestanding', '-fno-builtin', '-fno-pie', '-fno-pic', '-fno-stack-protector',
+    # float/double run on the x87 FPU (BDK start enables it); no SSE/MMX.
+    flags = ['-m32', '-march=i386', '-mno-sse', '-mno-mmx', '-O2',
+             '-fwrapv', '-ffunction-sections', '-fdata-sections', '-ffreestanding', '-fno-builtin', '-fno-pie', '-fno-pic', '-fno-stack-protector',
              '-Wall', '-Wextra', '-nostdinc', '-DBARNIX_BDK', '-I', sdk / 'include', '-I', sdk / 'runtime',
              '-I', project / 'src']
     # Only compiler-internal freestanding headers (stddef/stdarg/etc), never host libc.
@@ -75,10 +76,10 @@ def build(project, native_sources=None):
             if not linker:
                 raise ValueError('LLVM lld linker is missing; rerun the BDK installer')
             flavor = ['-flavor', 'gnu'] if Path(linker).stem.lower() == 'lld' else []
-            run([linker, *flavor, '-m', 'elf_i386', '--build-id=none',
+            run([linker, *flavor, '-m', 'elf_i386', '--build-id=none', '--gc-sections',
                  '-T', sdk / 'runtime' / 'app.ld', *objects, '-o', linked])
         else:
-            run([cc, '-m32', '-nostdlib', '-static', '-no-pie', '-Wl,--build-id=none',
+            run([cc, '-m32', '-nostdlib', '-static', '-no-pie', '-Wl,--build-id=none', '-Wl,--gc-sections',
                  '-Wl,-T,' + str(sdk / 'runtime' / 'app.ld'), *objects, '-o', linked])
         data = bytearray(linked.read_bytes())
         if data[:7] != b'\x7fELF\x01\x01\x01':

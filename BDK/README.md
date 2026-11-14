@@ -218,7 +218,7 @@ cd GraphicCpp
 dotnet run
 ```
 
-Результат — `elf/app.elf` для Barnix ABI 9. BGL рисует окно на холсте
+Результат — `elf/app.elf` для Barnix ABI 11. BGL рисует окно на холсте
 640×400 с 16 цветами; без framebuffer использует текстовый экран 80×25.
 Поддерживаются UTF-8, кнопки, списки с прокруткой, перетаскивание окна,
 мышь, Tab, стрелки, Enter и Esc. Одновременно доступно до 32 виджетов.
@@ -246,3 +246,152 @@ C#: `using Barnix;`, затем `Graphics.Init(title,x,y,width,height)`,
 `Graphics.SetTitle(text)` меняет заголовок; перед выходом вызовите
 `Graphics.Close()`, чтобы вернуть консоль. Полный пример находится в
 `src/main.cs` проекта `bga_cs`.
+
+## Barnix Graphics (BGX): полноцветный холст для игр
+
+`barnix_gfx.h` — библиотека, а не рабочий стол: программа занимает весь экран,
+рисует в свой буфер `0x00RRGGBB` и показывает его через `bgx_present`.
+На UEFI кадр идёт в GOP framebuffer, на Legacy BIOS — в Bochs/QEMU VBE или
+VGA 320×200×256; текстовая консоль восстанавливается при `bgx_close` и выходе.
+
+```c
+#include <barnix_gfx.h>
+static unsigned int pixels[640 * 400];
+int main(void) {
+    BgxCanvas screen;
+    if (bgx_open(&screen, pixels, 640, 400)) return 1;
+    for (;;) {
+        BgxEvent event;
+        while (bgx_poll(&event))
+            if (event.type == BGX_PRESS && event.code == BGX_KEY_ESC) { bgx_close(); return 0; }
+        BgxMouse mouse; bgx_mouse(&mouse);          /* x, y, dx, dy, wheel, pressed */
+        bgx_clear(&screen, BGX_RGB(30, 40, 60));
+        bgx_fill(&screen, mouse.x, mouse.y, 20, 20, bgx_key_held(BGX_KEY_SPACE) ? 0xffff55 : 0x55ff55);
+        bgx_text_shadow(&screen, 8, 8, "Hello, BGX", BGX_WHITE, 2);
+        bgx_present(&screen);
+    }
+}
+```
+
+Есть заливка, полупрозрачность, рамки, ARGB-изображения с масштабом,
+увеличение холста, UTF-8 текст системным шрифтом 8×16, курсор и `bgx_millis`.
+События клавиш содержат нажатие, автоповтор и отпускание (set-1 коды
+`BGX_KEY_*`), поэтому удержание клавиш работает без чтения портов.
+
+Все ядра процессора (ABI 11): `bgx_parallel(job, argument, count)` вызывает
+`job(argument, i)` для каждого `i` от 0 до `count - 1` на всех ядрах и
+возвращается, когда всё готово; `bgx_cpus()` — число ядер. Задания только
+считают (без вызовов `bgx_*` и `barnix->`); делите кадр на полосы по 8 строк,
+чтобы быстрые ядра брали больше. На старых ядрах Barnix задания идут по очереди.
+
+## Barnix OpenGL (BXGL): настоящий OpenGL 1.1
+
+`<barnix_opengl.h>` подключает стандартные `<GL/gl.h>`, `<GL/glu.h>` и
+`<math.h>`. Это программная реализация OpenGL 1.1 (как Mesa/TinyGL):
+геометрия считается на FPU x87, а треугольники растеризуются полосами
+сразу на всех ядрах процессора (`bgx_parallel`). Обычный код OpenGL
+переносится почти без изменений — заменяется только создание окна.
+
+```c
+#include <barnix_opengl.h>
+int main(void) {
+    if (bxgl_open(0, 0)) return 1;              /* весь экран, до 1024x768 */
+    glEnable(GL_DEPTH_TEST); glEnable(GL_LIGHTING); glEnable(GL_LIGHT0);
+    for (;;) {
+        BgxEvent e;
+        while (bgx_poll(&e)) if (e.type == BGX_PRESS && e.code == BGX_KEY_ESC) { bxgl_close(); return 0; }
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glMatrixMode(GL_PROJECTION); glLoadIdentity();
+        gluPerspective(60, (double)bxgl_width() / bxgl_height(), 0.5, 50);
+        glMatrixMode(GL_MODELVIEW); glLoadIdentity();
+        glTranslatef(0, 0, -5); glRotatef(bgx_millis() * 0.05f, 1, 1, 0);
+        /* ... glBegin/glVertex/glEnd, glDrawArrays, glCallList ... */
+        bxgl_swap();
+    }
+}
+```
+
+Поддерживается: `glBegin/glEnd` со всеми 10 типами примитивов, матричные
+стеки, `glOrtho/glFrustum`, отсечение по пирамиде видимости, буфер глубины,
+отсечение граней, `glPolygonMode` (каркас/точки), плоское и Гуро-затенение,
+освещение (8 источников: направленные, точечные, прожекторы, затухание,
+блики, `GL_COLOR_MATERIAL`), туман (linear/exp/exp2), текстуры RGB/RGBA/
+luminance с перспективной коррекцией, фильтрами nearest/linear и
+мип-уровнями, режимы `GL_MODULATE/REPLACE/DECAL/BLEND/ADD`, смешивание,
+alpha test, scissor, `glColorMask`, `glPolygonOffset`, массивы вершин
+(`glDrawArrays/glDrawElements/glInterleavedArrays`), дисплейные списки,
+`glPushAttrib`, `glReadPixels`, `glCopyTexImage2D`, `glGet*`. GLU:
+`gluPerspective`, `gluLookAt`, `gluOrtho2D`, `gluProject/UnProject`,
+`gluBuild2DMipmaps`, `gluSphere/Cylinder/Disk/PartialDisk`.
+
+Нет: шейдеров (это OpenGL 1.1, а не 2.0+), трафарета, альфа-канала в буфере
+кадра, сглаживания линий, `glTexGen`. Мип-уровень выбирается один на
+треугольник.
+
+Контекст забирает расширенную память программы (`barnix->memory`): в
+OpenGL-программе выделяйте память через `bxgl_alloc/bxgl_free`. Без
+расширенной памяти контекст работает в 320×200. Для 2D-надписей поверх
+3D: `glFinish()`, затем `bgx_text(bxgl_canvas(), ...)`, затем `bxgl_swap()`.
+`bxgl_context` рисует во внешние буферы без экрана. Пример —
+`examples/glcube.c`; в Barnix есть демо `gldemo`.
+
+Начиная с этой версии BDK компилирует `float` и `double` на FPU x87
+(раньше был `-msoft-float`, и программы с плавающей точкой не компоновались);
+`start.c` включает FPU перед `main`. `<math.h>` даёт `sinf/cosf/sqrtf/powf`
+и остальные функции в вариантах float и double.
+
+## Barnix Sound (BSND): звук
+
+`barnix_sound.h` (ABI 11): ядро смешивает до 16 клипов на 48 кГц и выводит их
+через Intel HD Audio или AC'97; без звуковой карты остаётся PC speaker.
+`bsnd_device` возвращает `BARNIX_SOUND_CARD`, `BARNIX_SOUND_SPEAKER` или 0 и
+название устройства. Сэмплы клипа живут в памяти программы, пока он звучит.
+
+```c
+#include <barnix_sound.h>
+static short note[48000];
+int main(void) {
+    if (bsnd_device(0, 0) != BARNIX_SOUND_CARD) { bsnd_beep(880, 200); return 0; }
+    BsndTone tone = {BSND_PLUCK, bsnd_note_hz(69), 0, 800, 3, 300, 220};  /* A4 */
+    unsigned int frames = bsnd_synth(note, 48000, 32000, &tone);
+    int voice = bsnd_play(note, frames, 32000, 256, 0);                  /* громкость, панорама */
+    while (bsnd_playing(voice)) barnix->sleep_ms(20);
+    return 0;
+}
+```
+
+Синтезатор умеет square, triangle, saw, sine, noise, organ и щипок струны
+(`BSND_PLUCK`) со сдвигом высоты, атакой и затуханием; `bsnd_mix` складывает
+ноты в один клип, `bsnd_wav` разбирает WAV (PCM 8/16 бит, моно/стерео) для
+`bsnd_play_clip`, `bsnd_tone`/`bsnd_beep` звучат на PC speaker.
+`bsnd_ulaw` распаковывает 8-битный mu-law (G.711) в 16-битные сэмплы: так
+`scripts/sound_assets.py` встраивает WAV-файлы в программу вдвое компактнее.
+
+## Barnix Net (BNET): HTTP и HTTPS
+
+ABI 12. Ядро даёт TCP (`barnix->net_open/net_send/net_recv/net_close`),
+библиотека добавляет HTTP/1.1 и TLS 1.2/1.3 с проверкой сертификатов по
+корням из `/etc/ssl/roots`. Подключите `runtime/net.c http.c tls.c x509.c
+pk.c crypto.c` (и `inflate.c` для `bnet_inflate`).
+
+```c
+#include <barnix_net.h>
+
+static int save(void *context, const void *data, unsigned int length)
+{ (void)context; barnix->append("page.html", data, (int)length); return 0; }
+
+BnetRequest request = {0};
+request.data = save;
+if (bnet_request("https://example.com/", &request))
+    barnix->println(4, request.error);
+```
+
+`bnet_request` следует редиректам, понимает chunked-ответы и POST
+(`method`, `content_type`, `body`). Для своих протоколов есть
+`bnet_tcp_open/send/recv/close`, для zlib/deflate — `bnet_inflate`.
+
+## Размер и совместимость
+
+Сборщик компонует программы с `--gc-sections`: неиспользуемый код
+библиотек (например, TLS из BNET) выбрасывается, игра весит около 30 КиБ.
+Программа запускается на ядре с тем же или более новым ABI.

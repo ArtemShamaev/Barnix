@@ -21,7 +21,7 @@ def sdk(destination):
                     ignore=shutil.ignore_patterns('__pycache__', 'bin', 'obj'))
     headers = destination / 'include' / 'barnix'
     headers.mkdir(parents=True, exist_ok=True)
-    for name in ('app_abi.h', 'mouse.h', 'keyboard.h'):
+    for name in ('app_abi.h', 'mouse.h', 'keyboard.h', 'audio.h', 'netinfo.h'):
         shutil.copy2(REPO / name, headers / name)
     for name in ('text.c', 'text.h'):
         shutil.copy2(REPO / name, destination / 'runtime' / name)
