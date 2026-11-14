@@ -61,7 +61,7 @@ int hid_mouse_descriptor(HidMouse *m,const unsigned char *d,unsigned int length)
 }
 static int value_at(const unsigned char *p,HidMouseField *f){
     unsigned int v=0;for(unsigned int i=0;i<f->size;i++)v|=((p[(f->bit+i)/8]>>((f->bit+i)%8))&1U)<<i;
-    if(f->minimum<0&&f->size<32&&(v&(1U<<(f->size-1))))v|=~((1U<<f->size)-1);
+    if(f->minimum<0&&f->size&&f->size<32&&(v&(1U<<(f->size-1))))v|=~((1U<<f->size)-1);
     return (int)v;
 }
 static int absolute(int value,int low,int high,int pixels){

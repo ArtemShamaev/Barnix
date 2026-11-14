@@ -27,15 +27,32 @@ typedef struct {
     HidMouse d_hid;
     int d_report_protocol;
     int d_ready, d_mouse, d_seen, d_pending;
-    unsigned char d_low, d_mouse_ep, d_mouse_toggle;
+    unsigned char d_low, d_mouse_ep, d_mouse_toggle, d_enum_retries;
+    unsigned int d_retry_at;
     unsigned short d_mouse_size;
+    /* Hubs: one level, as the Intel rate-matching hub behind EHCI needs.
+     * Children live in HUB_CHILDREN extra entries after the root ports. */
+    signed char d_parent;            /* hub entry, -1 on a root port */
+    unsigned char d_hub_port, d_speed, d_hub, d_hub_ports, d_controller, d_linked;
+    unsigned short d_hub_seen, d_vid, d_pid;
+    unsigned char d_classes[4];      /* first interface classes, for listings */
+    unsigned int d_scan_at;
+    /* Mouse pipe on EHCI/OHCI (-1 none) and diagnostics for "devices". */
+    signed char d_pipe;
+    unsigned char d_error_run;
+    unsigned int d_reports, d_errors, d_last_error;
     QH d_mouse_queue __attribute__((aligned(16)));
     TD d_mouse_td __attribute__((aligned(16)));
     unsigned char d_report[1024] __attribute__((aligned(16)));
 } UsbDevice;
 static UsbController controllers[USB_CONTROLLERS];
-static UsbDevice devices[32];
+#define ROOT_DEVICES 32
+#define HUB_CHILDREN 8
+static UsbDevice devices[ROOT_DEVICES + HUB_CHILDREN];
+static int root_count;
+static unsigned int tsc_per_ms, generation_counter;
 static int initialized, controller_count, detected_count, device_count, unit;
+static unsigned int mouse_poll_count;
 static int xhci_unit=-1;
 static UsbController *controller = &controllers[0];
 static UsbDevice *device = &devices[0];
@@ -93,7 +110,7 @@ static int start_controller(void)
     if (initialized) return device_count ? 0 : -1;
     initialized = 1;
     int legacy_count=usb_legacy_init();
-    for(int n=0;n<32;n++)devices[n].d_legacy=-1;
+    for(int n=0;n<ROOT_DEVICES+HUB_CHILDREN;n++){devices[n].d_legacy=-1;devices[n].d_parent=-1;devices[n].d_pipe=-1;}
     for (unsigned int bus = 0; bus < 256; bus++)
         for (unsigned int slot = 0; slot < 32; slot++)
         {
@@ -139,9 +156,14 @@ static int start_controller(void)
             }
         }
     device_count=controller_count*2;
-    for(int n=0;n<legacy_count&&device_count<32;n++)devices[device_count++].d_legacy=n;
+    for(int n=0;n<device_count;n++)devices[n].d_controller=(unsigned char)(n/2);
+    for(int n=0;n<legacy_count&&device_count<ROOT_DEVICES;n++)devices[device_count++].d_legacy=n;
+    root_count=device_count;
+    /* Hub children get fixed entries, so USB disk names stay stable (none
+     * without legacy controllers: xHCI disks then start at usb0). */
+    for(int n=0;root_count&&n<HUB_CHILDREN;n++)devices[device_count++].d_parent=-2;
     controller = &controllers[0];
-    return device_count ? 0 : -1;
+    return root_count ? 0 : -1;
 }
 int usb_storage_select(int index)
 {
@@ -152,11 +174,12 @@ int usb_storage_select(int index)
         return usb_xhci_controller_count()?0:-1;
     }
     xhci_unit=-1;
-    unit = index; device = &devices[index]; controller = &controllers[index < controller_count*2 ? index/2:0];
+    unit = index; device = &devices[index]; controller = &controllers[device->d_controller];
     return 0;
 }
 static int connected(void)
 {
+    if (device->d_parent >= 0 && !device->d_hub_port) return 0;
     unsigned short status = device->d_legacy>=0?usb_legacy_status(device->d_legacy):in16(root_port);
     return (status & 5) == 5 && !(status & 2);
 }
@@ -169,12 +192,17 @@ int usb_storage_present(void)
 unsigned int usb_storage_sectors(void) { return xhci_unit>=0?usb_xhci_storage_sectors(xhci_unit):capacity; }
 unsigned int usb_storage_generation(void) { return xhci_unit>=0?usb_xhci_storage_generation(xhci_unit):generation; }
 
+static unsigned int route(void)
+{
+    if (device->d_parent < 0) return USB_ROUTE_ROOT;
+    return USB_ROUTE(device->d_speed, devices[(int)device->d_parent].d_address, device->d_hub_port);
+}
 /* One synchronous packet chain, maximum 4096 bytes. Short IN packets stop
  * the chain; all descriptors are detached before their buffers can be reused. */
 static int transfer(unsigned char pid, unsigned char endpoint, unsigned short max_packet,
                     unsigned char *toggle, void *buffer, unsigned int length)
 {
-    if(device->d_legacy>=0)return usb_legacy_transfer(device->d_legacy,address,endpoint,max_packet,pid,toggle,buffer,length);
+    if(device->d_legacy>=0)return usb_legacy_transfer(device->d_legacy,address,endpoint,max_packet,pid,toggle,buffer,length,route());
     if (!connected() || !max_packet || length > sizeof(dma)) return -1;
     unsigned int count = length ? (length + max_packet - 1) / max_packet : 1;
     if (count > sizeof(transfers) / sizeof(transfers[0])) return -1;
@@ -268,12 +296,181 @@ error:
     ready = 0; /* Next mount resets/re-enumerates the port, including BOT state. */
     return -1;
 }
+static int enumerate_device(void);
+static int uhci_mouse(int n);
+static unsigned int tsc_ms(void)
+{
+    unsigned int lo, hi;
+    if (!tsc_per_ms) {
+        __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+        unsigned int start = lo;
+        delay_ms(10);
+        __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+        tsc_per_ms = (lo - start) / 10 >> 10;   /* units of 1024 cycles */
+        if (!tsc_per_ms) tsc_per_ms = 1;
+    }
+    __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+    return (hi << 22 | lo >> 10) / tsc_per_ms;   /* wraps after ~1000 s: only a rescan */
+}
+static void close_pipe(UsbDevice *d)
+{
+    if (d->d_pipe >= 0) usb_legacy_pipe_close(d->d_pipe);
+    d->d_pipe = -1;
+}
+static int report(int n, unsigned int length);
+/* A failed interrupt transfer does not end the mouse: receivers and hubs
+ * see occasional errors. The next poll retries; every 8th failure in a row
+ * also clears a halt on the device and restarts the data toggle; after 64
+ * in a row the mouse is given up (the device stays listed). */
+static int mouse_error(int n, unsigned int status)
+{
+    UsbDevice *d = &devices[n];
+    d->d_errors++; d->d_last_error = status;
+    if (++d->d_error_run > 64) {
+        close_pipe(d);
+        d->d_mouse = 0; d->d_pending = 0;
+        return mouse_source(n + 1, 0, 0, 0, 0, 0, 0);
+    }
+    if (!(d->d_error_run & 7)) {
+        control(0x02, 1, 0, 0x80 | d->d_mouse_ep, NULL, 0);   /* CLEAR_FEATURE(ENDPOINT_HALT) */
+        d->d_mouse_toggle = 0;
+    }
+    return 0;
+}
+/* EHCI/OHCI: one poll of the mouse pipe of devices[n] (the current device). */
+static int legacy_mouse(int n, unsigned int where)
+{
+    UsbDevice *d = &devices[n];
+    int length = usb_legacy_mouse(d->d_pipe, address, d->d_mouse_ep, d->d_mouse_size, &d->d_mouse_toggle, d->d_report, where);
+    if (length == -3) return mouse_error(n, usb_legacy_pipe_status(d->d_pipe));
+    if (length == -1) {
+        close_pipe(d);
+        d->d_mouse = 0;
+        return mouse_source(n + 1, 0, 0, 0, 0, 0, 0);
+    }
+    if (length < 0) return 0;
+    d->d_reports++; d->d_error_run = 0;
+    return length ? report(n, (unsigned int)length) : 0;
+}
+static void detach(int n)
+{
+    UsbDevice *d = &devices[n];
+    if (d->d_mouse) mouse_source(n + 1, 0, 0, 0, 0, 0, 0);
+    close_pipe(d);
+    d->d_mouse_queue.element = 1;
+    __asm__ volatile("" ::: "memory");
+    d->d_mouse = d->d_pending = d->d_ready = 0;
+    d->d_hub_port = 0;
+    d->d_parent = -2;
+}
+static void detach_children(int hub)
+{
+    for (int n = root_count; n < device_count; n++)
+        if (devices[n].d_parent == hub) detach(n);
+}
+/* UHCI walks one queue chain per controller: append the child's queue. */
+static void link_queue(UsbDevice *d)
+{
+    if (d->d_legacy >= 0 || d->d_linked) return;
+    QH *q = &queue;
+    for (int i = 0; i < 64 && !(q->link & 1); i++) q = (QH *)(q->link & ~15U);
+    d->d_mouse_queue.link = 1; d->d_mouse_queue.element = 1;
+    __asm__ volatile("" ::: "memory");
+    q->link = (uint32_t)&d->d_mouse_queue | 2;
+    d->d_linked = (unsigned char)(d->d_controller + 1);
+}
+/* Look at every hub port once; reset and enumerate new devices. */
+static int scan_hub(int hub)
+{
+    UsbDevice *saved = device; UsbController *saved_controller = controller;
+    int saved_unit = unit, changed = 0;
+    UsbDevice *h = &devices[hub];
+    controller = &controllers[h->d_controller];
+    h->d_scan_at = tsc_ms();
+    for (unsigned int p = 1; p <= h->d_hub_ports; p++) {
+        device = h; unit = hub;
+        unsigned char data[4];
+        if (control(0xA3, 0, 0, p, data, 4) != 4) break;
+        unsigned int status = data[0] | data[1] << 8, change = data[2] | data[3] << 8;
+        int child = -1;
+        for (int n = root_count; n < device_count; n++)
+            if (devices[n].d_parent == hub && devices[n].d_hub_port == p) child = n;
+        if (!(status & 1) || (change & 1)) {
+            if (child >= 0) { if (devices[child].d_mouse) changed = 1; detach(child); }
+            child = -1;
+            h->d_hub_seen &= ~(1U << p);
+        }
+        for (unsigned int bit = 0; bit < 5; bit++)
+            if (change & (1U << bit)) control(0x23, 1, 16 + bit, p, NULL, 0);
+        if (!(status & 1) || child >= 0 || (h->d_hub_seen & (1U << p))) continue;
+        h->d_hub_seen |= 1U << p;
+        int slot = -1;
+        for (int n = root_count; n < device_count && slot < 0; n++)
+            if (devices[n].d_parent == -2 && (!devices[n].d_linked || devices[n].d_linked == h->d_controller + 1)) slot = n;
+        if (slot < 0) continue;
+        delay_ms(100);                                   /* debounce */
+        if (control(0x23, 3, 4, p, NULL, 0)) continue;   /* PORT_RESET */
+        int reset = 0;
+        for (int i = 0; i < 50 && !reset; i++) {
+            delay_ms(10);
+            if (control(0xA3, 0, 0, p, data, 4) != 4) break;
+            status = data[0] | data[1] << 8;
+            reset = !(status & 16) && (status & 2);
+        }
+        control(0x23, 1, 20, p, NULL, 0);                /* C_PORT_RESET */
+        if (!reset) continue;
+        delay_ms(10);
+        UsbDevice *c = &devices[slot];
+        unsigned char linked = c->d_linked;
+        memset(c, 0, (unsigned int)((unsigned char *)&c->d_mouse_queue - (unsigned char *)c));
+        c->d_linked = linked;
+        c->d_parent = (signed char)hub; c->d_hub_port = (unsigned char)p;
+        c->d_legacy = h->d_legacy; c->d_port = h->d_port; c->d_controller = h->d_controller;
+        c->d_speed = status & 0x200 ? USB_SPEED_LOW : status & 0x400 ? USB_SPEED_HIGH : USB_SPEED_FULL;
+        c->d_low = c->d_speed == USB_SPEED_LOW;
+        link_queue(c);
+        device = c; unit = slot;
+        int result = enumerate_device();
+        c->d_seen = 1;
+        if (result == 1) changed = 1;
+        if (result < 0) c->d_ready = 0;
+    }
+    device = saved; unit = saved_unit; controller = saved_controller;
+    return changed;
+}
+/* Disk scans look for new devices behind hubs at once. */
+static void rescan_hubs(void)
+{
+    for (int n = 0; n < root_count; n++)
+        if (devices[n].d_hub && tsc_ms() - devices[n].d_scan_at >= 100) scan_hub(n);
+}
+/* A hub on a root port: power its ports and attach what is there. */
+static int setup_hub(void)
+{
+    if (device->d_parent >= 0) return -1;                /* one level of hubs */
+    unsigned char hub[16];
+    if (control(0xA0, 6, 0x2900, 0, hub, 9) < 7) return -1;
+    device->d_hub_ports = hub[2] > 15 ? 15 : hub[2];
+    for (unsigned int p = 1; p <= device->d_hub_ports; p++) control(0x23, 3, 8, p, NULL, 0);
+    delay_ms(hub[5] * 2U + 100);
+    device->d_hub = 1; device->d_hub_seen = 0;
+    scan_hub(unit);
+    return 2;
+}
+/* Children are polled like root devices, through the hub's root port. */
+static int poll_child(int n)
+{
+    UsbDevice *d = &devices[n];
+    if (!d->d_hub_port || !d->d_mouse) return 0;
+    if (d->d_legacy >= 0) return legacy_mouse(n, route());
+    return uhci_mouse(n);   /* device is d: usb_mouse_poll selected it */
+}
 static int enumerate_port(unsigned short port)
 {
     root_port = port;
     unsigned short status=device->d_legacy>=0?usb_legacy_status(device->d_legacy):in16(port);
     if(!(status&1))return -1;
-    device->d_low=!!(status&0x100);
+    device->d_low=device->d_legacy>=0?!!(status&0x100):!!(status&(1U<<4));
     if(device->d_legacy>=0){if(usb_legacy_reset(device->d_legacy))return -1;}
     else{
         if(delay_ms(100))return -1;
@@ -284,7 +481,15 @@ static int enumerate_port(unsigned short port)
         out16(port, (in16(port) & ~0x100A) | 0xE);
         if (delay_ms(10) || !connected()) return -1;
     }
+    return enumerate_device();
+}
+/* Addresses and configures the device now at address 0 (its port was just
+ * reset): 0 storage, 1 mouse, 2 hub, -1 nothing usable. */
+static int enumerate_device(void)
+{
     address = 0; ep0_size = 8; bulk_in = bulk_out = 0;
+    for (int i = 0; i < 4; i++) device->d_classes[i] = 0;
+    device->d_vid = device->d_pid = 0; device->d_hub = 0;
     in_toggle = out_toggle = 0;
     unsigned char descriptor[4096];
     if (control(0x80, 6, 0x100, 0, descriptor, 8) != 8) return -1;
@@ -293,6 +498,11 @@ static int enumerate_port(unsigned short port)
     if (control(0, 5, unit + 1, 0, NULL, 0)) return -1;
     address = unit + 1;
     if (delay_ms(3)) return -1;
+    if (control(0x80, 6, 0x100, 0, descriptor, 18) == 18) {
+        device->d_vid = descriptor[8] | descriptor[9] << 8;
+        device->d_pid = descriptor[10] | descriptor[11] << 8;
+    }
+    int hub_device = descriptor[4] == 9;
     if (control(0x80, 6, 0x200, 0, descriptor, 9) != 9 || descriptor[1] != 2) return -1;
     unsigned int total = descriptor[2] | ((unsigned int)descriptor[3] << 8);
     if (total < 9 || total > sizeof(descriptor) ||
@@ -300,6 +510,9 @@ static int enumerate_port(unsigned short port)
     unsigned char configuration = descriptor[5];
     if(control(0,9,configuration,0,NULL,0))return -1;
     device->d_mouse_ep=0;
+    for(unsigned int offset=9,k=0;offset+2<=total&&k<4;offset+=descriptor[offset]>=2?descriptor[offset]:total)
+        if(descriptor[offset+1]==4&&descriptor[offset]>=9&&!descriptor[offset+3])device->d_classes[k++]=descriptor[offset+5]?descriptor[offset+5]:0xff;
+    if(hub_device||(descriptor[9+1]==4&&descriptor[9+5]==9))return setup_hub();
     /* Composite receivers often expose a keyboard before the mouse. Inspect
      * each interface independently, including its own HID report descriptor. */
     for(unsigned int offset=9;offset+2<=total;){
@@ -337,7 +550,10 @@ static int enumerate_port(unsigned short port)
                 !hid_mouse_descriptor(&device->d_hid,report_descriptor,report_length);
             if(protocol&&boot&&control(0x21,11,1,interface_number,NULL,0))protocol=0;
             if(protocol||(boot&&packet>=3&&!control(0x21,11,0,interface_number,NULL,0))){
+                close_pipe(device);
+                if(device->d_legacy>=0&&(device->d_pipe=(signed char)usb_legacy_pipe(device->d_legacy))<0){offset=end;continue;}
                 device->d_report_protocol=protocol;device->d_mouse_ep=endpoint;device->d_mouse_size=packet;
+                device->d_reports=device->d_errors=device->d_last_error=0;device->d_error_run=0;
                 control(0x21,10,0,interface_number,NULL,0);
                 device->d_mouse=1;device->d_mouse_toggle=0;device->d_pending=0;
                 mouse_source(unit+1,1,0,0,0,0,0);return 1;
@@ -364,7 +580,7 @@ static int enumerate_port(unsigned short port)
     if (command(capacity_command, 10, descriptor, 8, 1) || big32(descriptor + 4) != 512 ||
         big32(descriptor) == 0xFFFFFFFFU) return -1;
     capacity = big32(descriptor) + 1;
-    generation++;
+    generation = ++generation_counter;   /* unique: hub children reuse entries */
     ready = 1;
     return 0;
 }
@@ -372,13 +588,17 @@ int usb_storage_probe(void)
 {
     if(xhci_unit>=0)return usb_xhci_storage_present(xhci_unit)?0:-1;
     if (usb_storage_present()) return 0;
-    if(device->d_mouse && connected())return -1;
     if (start_controller()) return -1;
     if (unit >= device_count) return -1;
+    if (device->d_parent != -1) {           /* hub children are enumerated by their hub */
+        rescan_hubs();
+        return usb_storage_present() ? 0 : -1;
+    }
+    if((device->d_mouse||device->d_hub) && connected())return -1;
     int result=enumerate_port(root_port);
     device->d_seen=1;
     if(result==0)return 0;
-    if(result==1)return -1;
+    if(result>=1)return -1;
     if(device->d_legacy>=0)usb_legacy_disable(device->d_legacy);else out16(root_port, in16(root_port) & ~4U);
     ready = 0;
     return -1;
@@ -406,74 +626,134 @@ int usb_storage_flush(void)
 
 /* Persistent interrupt TDs share each controller schedule with bulk/control.
  * An idle mouse NAKs in hardware and never blocks keyboard polling. */
+static int report(int n, unsigned int length)
+{
+    UsbDevice *d = &devices[n];
+    if (d->d_report_protocol) return hid_mouse_report(&d->d_hid, n + 1, d->d_report, length);
+    if (length >= 3) return mouse_source(n + 1, 1, (signed char)d->d_report[1], (signed char)d->d_report[2], d->d_report[0] & 7, 0, 0);
+    return 0;
+}
+static int uhci_mouse(int n)
+{
+    int changed = 0;
+    TD *td = &device->d_mouse_td;
+    if (device->d_pending) {
+        if (td->status & ACTIVE) return 0;
+        device->d_mouse_queue.element = 1;
+        if (td->status & ERRORS) {
+            device->d_pending = 0;
+            changed |= mouse_error(n, td->status >> 16 & 0xff);
+            if (!device->d_mouse) return changed;
+        } else {
+            unsigned int length = (td->status + 1) & 0x7ff;
+            device->d_mouse_toggle ^= 1;
+            device->d_reports++; device->d_error_run = 0;
+            if (length <= device->d_mouse_size) changed |= report(n, length);
+        }
+    }
+    td->link = 1; td->buffer = (uint32_t)device->d_report;
+    td->token = PID_IN | ((uint32_t)address << 8) | ((uint32_t)device->d_mouse_ep << 15) |
+                ((uint32_t)device->d_mouse_toggle << 19) | ((device->d_mouse_size - 1U) << 21);
+    td->status = ACTIVE | (3U << 27) | (1U << 29) | ((uint32_t)device->d_low << 26) | 0x7ff;
+    __asm__ volatile("" ::: "memory");
+    device->d_mouse_queue.element = (uint32_t)td;
+    device->d_pending = 1;
+    return changed;
+}
 int usb_mouse_poll(void)
 {
     if(start_controller())return 0;
+    mouse_poll_count++;
     UsbDevice *saved=device;UsbController *saved_controller=controller;int saved_unit=unit;
     int changed=0;
     for(int n=0;n<device_count;n++) {
-        device=&devices[n];controller=&controllers[n<controller_count*2?n/2:0];unit=n;
+        device=&devices[n];controller=&controllers[device->d_controller];unit=n;
+        if(device->d_parent!=-1){
+            if(device->d_parent>=0)changed|=poll_child(n);
+            continue;
+        }
         unsigned short state=device->d_legacy>=0?usb_legacy_status(device->d_legacy):in16(root_port);
         if(!(state&1) || (state&2)) {
             if(device->d_mouse)changed|=mouse_source(n+1,0,0,0,0,0,0);
-            if(device->d_legacy>=0)usb_legacy_mouse_stop(device->d_legacy);
+            close_pipe(device);
             device->d_mouse_queue.element=1;
             __asm__ volatile("":::"memory");
-            device->d_mouse=0;device->d_seen=0;device->d_pending=0;ready=0;
+            if(device->d_hub)detach_children(n);
+            device->d_mouse=0;device->d_hub=0;device->d_seen=0;device->d_pending=0;device->d_enum_retries=0;device->d_retry_at=0;ready=0;
             if(state&2){if(device->d_legacy>=0)usb_legacy_ack(device->d_legacy);else out16(root_port,(state&~0xa)|2);}
         }
         if(!(state&1))continue;
-        if(!device->d_seen && !ready) {
+        if(!device->d_seen && !ready &&
+           (int)(mouse_poll_count-device->d_retry_at)>=0) {
             device->d_seen=1;
-            if(enumerate_port(root_port)<0)continue;
-        }
-        if(!device->d_mouse)continue;
-        if(device->d_legacy>=0){
-            int length=usb_legacy_mouse(device->d_legacy,address,device->d_mouse_ep,device->d_mouse_size,&device->d_mouse_toggle,device->d_report);
-            if(length==-1){usb_legacy_mouse_stop(device->d_legacy);device->d_mouse=0;changed|=mouse_source(n+1,0,0,0,0,0,0);}
-            else if(length>0){
-                if(device->d_report_protocol)changed|=hid_mouse_report(&device->d_hid,n+1,device->d_report,length);
-                else if(length>=3)changed|=mouse_source(n+1,1,(signed char)device->d_report[1],(signed char)device->d_report[2],device->d_report[0]&7,0,0);
-            }
-            continue;
-        }
-        TD *td=&device->d_mouse_td;
-        if(device->d_pending) {
-            if(td->status&ACTIVE)continue;
-            device->d_mouse_queue.element=1;
-            if(td->status&ERRORS) {
-                changed|=mouse_source(n+1,0,0,0,0,0,0);
-                device->d_mouse=0;device->d_pending=0;
+            int result=enumerate_port(root_port);
+            if(result<0) {
+                if(device->d_enum_retries<3) {
+                    device->d_enum_retries++;
+                    device->d_retry_at=mouse_poll_count+128;
+                    device->d_seen=0;
+                }
                 continue;
             }
-            unsigned int length=(td->status+1)&0x7ff;
-            device->d_mouse_toggle^=1;
-            if(length<=device->d_mouse_size)
-                {
-                    if(device->d_report_protocol)changed|=hid_mouse_report(&device->d_hid,n+1,device->d_report,length);
-                    else if(length>=3)changed|=mouse_source(n+1,1,(signed char)device->d_report[1],(signed char)device->d_report[2],device->d_report[0]&7,0,0);
-                }
+            if(result==2)changed=1;
+            device->d_enum_retries=0;
         }
-        td->link=1;td->buffer=(uint32_t)device->d_report;
-        td->token=PID_IN|((uint32_t)address<<8)|((uint32_t)device->d_mouse_ep<<15)|
-            ((uint32_t)device->d_mouse_toggle<<19)|((device->d_mouse_size-1U)<<21);
-        td->status=ACTIVE|(3U<<27)|(1U<<29)|((uint32_t)device->d_low<<26)|0x7ff;
-        __asm__ volatile("":::"memory");
-        device->d_mouse_queue.element=(uint32_t)td;
-        device->d_pending=1;
+        /* Hubs report attach/detach on a status pipe; reading the ports
+         * twice a second is cheaper than a second interrupt pipe. */
+        if(device->d_hub){
+            if(tsc_ms()-device->d_scan_at>=500)changed|=scan_hub(n);
+            continue;
+        }
+        if(!device->d_mouse)continue;
+        if(device->d_legacy>=0){changed|=legacy_mouse(n,USB_ROUTE_ROOT);continue;}
+        changed|=uhci_mouse(n);
     }
     device=saved;controller=saved_controller;unit=saved_unit;
     return changed;
 }
 
+static void hex4(unsigned int value)
+{
+    char text[5];
+    for (int i = 0; i < 4; i++) text[i] = "0123456789abcdef"[value >> (12 - 4 * i) & 15];
+    text[4] = 0; print(WHITE, text);
+}
+static void describe(UsbDevice *d)
+{
+    hex4(d->d_vid); print(WHITE, ":"); hex4(d->d_pid);
+    static const char *const speeds[] = {" full", " low", " high", ""};
+    print(WHITE, speeds[d->d_parent >= 0 ? d->d_speed & 3 : 3]);
+    if (d->d_hub) { print(WHITE, " hub, ports "); print_uint(WHITE, d->d_hub_ports); println(WHITE, ""); return; }
+    if (d->d_mouse || d->d_reports || d->d_errors) {
+        print(d->d_mouse ? GREEN : YELLOW, d->d_mouse ? " mouse" : " mouse (stopped)");
+        print(WHITE, d->d_report_protocol ? " report" : " boot");
+        print(WHITE, ", reports "); print_uint(WHITE, d->d_reports);
+        print(d->d_errors ? YELLOW : WHITE, ", errors "); print_uint(d->d_errors ? YELLOW : WHITE, d->d_errors);
+        if (d->d_errors) { print(YELLOW, " (status "); hex4(d->d_last_error); print(YELLOW, ")"); }
+        println(WHITE, "");
+        return;
+    }
+    if (d->d_ready) { println(GREEN, " storage"); return; }
+    print(YELLOW, " not supported, interface classes");
+    for (int i = 0; i < 4 && d->d_classes[i]; i++) { print(YELLOW, " "); print_uint(YELLOW, d->d_classes[i] == 0xff ? 0 : d->d_classes[i]); }
+    println(YELLOW, d->d_classes[0] ? "" : " ? (no answer)");
+}
+/* devices lsblk: every controller and connected device, so a photo of the
+ * screen tells what a real machine has. */
 void usb_storage_diagnostics(void){
     start_controller();print(WHITE,"USB hosts (initialized/detected): UHCI ");print_uint(WHITE,controller_count);print(WHITE,"/");print_uint(WHITE,detected_count);
     usb_legacy_diagnostics();print(WHITE,", ");usb_xhci_diagnostics();println(WHITE,"");
-    for(int n=0;n<device_count;n++){
+    for(int n=0;n<root_count;n++){
         UsbDevice *d=&devices[n];
         unsigned int status=d->d_legacy>=0?usb_legacy_status(d->d_legacy):in16(d->d_port);
-        if((status&1)&&d->d_seen&&!d->d_ready&&!d->d_mouse){
-            print(WHITE,"USB port ");print_uint(WHITE,n);println(WHITE,": connected, no supported storage/mouse interface");
-        }
+        if(!(status&1))continue;
+        print(WHITE,"  ");
+        print(WHITE,d->d_legacy<0?"UHCI":usb_legacy_is_ehci(d->d_legacy)?"EHCI":"OHCI");
+        print(WHITE," port ");print_uint(WHITE,n);print(WHITE,": ");
+        if(!d->d_seen){println(WHITE,"connected, not enumerated yet");continue;}
+        describe(d);
+        for(int c=root_count;c<device_count;c++)
+            if(devices[c].d_parent==n){print(WHITE,"    hub port ");print_uint(WHITE,devices[c].d_hub_port);print(WHITE,": ");describe(&devices[c]);}
     }
+    usb_xhci_details();
 }

@@ -2,6 +2,7 @@
 #define DISK_H
 #include <stdint.h>
 #define DISK_SECTOR_SIZE 512
+#define DISK_MAX_WRITE_SECTORS 128U
 /* Decimal conversion without a compiler runtime 64-bit division helper. */
 static inline void disk_u64toa(uint64_t value, char *out)
 {
@@ -35,8 +36,12 @@ int disk_flush(void);
 int disk_read_many(unsigned int lba, void *buffer, unsigned int count);
 void disk_list(void);
 int disk_init(void);
-int disk_init_from_memory(const void *data, unsigned int size);
+/* Borrow writable, sector-aligned-size storage that stays reserved for the boot. */
+int disk_init_from_memory(void *data, unsigned int size);
 int disk_read(unsigned int lba, void *buffer);
 int disk_write(unsigned int lba, const void *buffer);
+int disk_write_many(unsigned int lba, const void *buffer, unsigned int count);
+/* Counts write requests, so block caches notice writes made around them. */
+extern unsigned int disk_writes;
 void disk_info(void);
 #endif

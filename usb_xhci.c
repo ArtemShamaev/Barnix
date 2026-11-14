@@ -30,12 +30,14 @@ typedef struct {
   unsigned char report[1024] __attribute__((aligned(4096)));
   HidMouse hid;
   unsigned int port, parent, parent_port, route, depth, speed, dci, packet,
-      hub_ports, hub_protocol, hub_seen;
+      hub_ports, hub_protocol, hub_seen, vid, pid;
   unsigned int bulk_in_dci, bulk_out_dci, bulk_in_packet, bulk_out_packet;
   int active, mouse, boot_mouse, storage, pending, done, result;
   unsigned int bytes, control_bytes, control_length, control_status;
   unsigned int bulk_wait, bulk_length, bulk_bytes;
   int bulk_done, bulk_result;
+  /* Mouse diagnostics for "devices": reports, errors, the last completion code. */
+  unsigned int reports, errors, error_run, last_code;
 } Device;
 typedef struct {
   uint64_t dcbaa[SLOTS + 1] __attribute__((aligned(64)));
@@ -49,12 +51,15 @@ typedef struct {
   unsigned int context_size, ports, event_index, event_cycle, index,
       poll_counter;
   unsigned int seen_ports, superspeed_ports;
+  unsigned int port_retry_at[32];
+  unsigned char port_retries[32];
   uint32_t waiting;
   int completion, completion_slot, ready;
 } Host;
 static Host hosts[HC_COUNT];
 static Host *host;
-static int started, host_count, detected_count;
+static int started, host_count, detected_count, routed_ports;
+static unsigned int host_ids[HC_COUNT];
 static unsigned char descriptor[4096] __attribute__((aligned(4096)));
 static unsigned char control_dma[4096] __attribute__((aligned(4096)));
 static unsigned char bulk_dma[4096] __attribute__((aligned(4096)));
@@ -85,7 +90,30 @@ static void pci_enable(unsigned int bus, unsigned int slot, unsigned int fn) {
   out32(0xcf8, 0x80000004U | (bus << 16) | (slot << 11) | (fn << 8));
   __asm__ volatile("outw %0,%1" ::"a"(value), "Nd"((unsigned short)0xcfc));
 }
+static void pci_write32(unsigned int bus, unsigned int slot, unsigned int fn,
+                        unsigned int reg, uint32_t value) {
+  out32(0xcf8, 0x80000000U | (bus << 16) | (slot << 11) | (fn << 8) | (reg & ~3U));
+  out32(0xcfc, value);
+}
 static void delay(void) { usb_delay_ms(1); }
+/* Intel 7/8/9-series chipsets (Panther, Lynx and Wildcat Point) start with
+ * every port wired to EHCI, behind its rate-matching hub; the BIOS leaves it
+ * so in legacy mode. Once this xHCI runs, hand all ports to it, as Linux
+ * does: USB3_PSSEN from USB3PRM, XUSB2PR from USB2PRM. */
+static void route_intel_ports(unsigned int bus, unsigned int slot, unsigned int fn) {
+  static const unsigned short switchable[] = {0x1e31, 0x8c31, 0x9c31, 0x8cb1, 0x9cb1, 0x8d31};
+  uint32_t id = pci(bus, slot, fn, 0);
+  if ((id & 0xffff) != 0x8086)
+    return;
+  for (unsigned int i = 0; i < sizeof(switchable) / sizeof(switchable[0]); i++)
+    if (id >> 16 == switchable[i]) {
+      pci_write32(bus, slot, fn, 0xd8, pci(bus, slot, fn, 0xdc) & 0xf);
+      pci_write32(bus, slot, fn, 0xd0, pci(bus, slot, fn, 0xd4) & 0x7fff);
+      routed_ports = 1;
+      usb_delay_ms(20);
+      return;
+    }
+}
 static void barrier(void) { __asm__ volatile("" ::: "memory"); }
 static void write64(volatile uint32_t *p, unsigned int value) {
   p[0] = value;
@@ -160,7 +188,7 @@ static void events(void) {
           v->result = 0;
         } else {
           v->bytes = 0;
-          v->result = -1;
+          v->result = -(int)(code ? code : 255);   /* the completion code */
         }
       }
     }
@@ -280,6 +308,8 @@ static void disconnect(unsigned int slot) {
   v->mouse = 0;
   v->pending = 0;
   host->seen_ports &= ~(1U << (v->port - 1));
+  host->port_retries[v->port - 1] = 0;
+  host->port_retry_at[v->port - 1] = 0;
   host->dcbaa[slot] = 0;
 }
 static unsigned int port_status(unsigned int port) {
@@ -332,6 +362,30 @@ static void slot_context(Device *v, unsigned int entries) {
       s[2] = ((uint32_t *)p->output)[2] & 0xffff;
   }
 }
+/* A failed interrupt transfer must not end the mouse: wireless receivers and
+ * hubs see occasional transaction errors. A halted endpoint is reset and its
+ * ring restarted (a stall is also cleared on the device); after many errors
+ * in a row the mouse is given up, the device stays attached. 0: give up. */
+static int recover_mouse(unsigned int slot) {
+  Device *v = &host->devices[slot];
+  unsigned int code = (unsigned int)-v->result;
+  v->result = 0;
+  v->errors++;
+  v->last_code = code;
+  if (++v->error_run > 64) {
+    v->mouse = 0;
+    mouse_source(48 + host->index * SLOTS + slot - 1, 0, 0, 0, 0, 0, 0);
+    return 0;
+  }
+  if (code == 23)   /* Missed Service: the endpoint keeps running */
+    return 1;
+  command(14, 0, slot | (v->dci << 8));   /* Reset Endpoint: Halted -> Stopped */
+  ring_init(&v->interrupt);
+  command(16, (uint32_t)v->interrupt.trbs | 1, slot | (v->dci << 8));   /* Set TR Dequeue */
+  if (code == 6)   /* Stall: CLEAR_FEATURE(ENDPOINT_HALT) */
+    control(slot, 0x02, 1, 0, 0x80 | (v->dci - 1) / 2, 0, 0);
+  return 1;
+}
 static int setup_mouse(unsigned int slot, unsigned int iface,
                        unsigned int endpoint, unsigned int packet,
                        unsigned int interval, unsigned int report_length,
@@ -375,6 +429,7 @@ static int setup_mouse(unsigned int slot, unsigned int iface,
   v->pending = 0;
   v->bytes = 0;
   v->result = 0;
+  v->reports = v->errors = v->error_run = v->last_code = 0;
   mouse_source(48 + host->index * SLOTS + slot - 1, 1, 0, 0, 0, 0, 0);
   return 0;
 }
@@ -399,6 +454,8 @@ static int configure(unsigned int slot) {
     return -1;
   if (control(slot, 0x80, 6, 0x100, 0, descriptor, 18))
     return -1;
+  v->vid = descriptor[8] | (unsigned int)descriptor[9] << 8;
+  v->pid = descriptor[10] | (unsigned int)descriptor[11] << 8;
   unsigned int device_protocol = descriptor[6];
   if (control(slot, 0x80, 6, 0x200, 0, descriptor, 9))
     return -1;
@@ -665,6 +722,12 @@ static int initialize(unsigned int base, unsigned int index) {
   if (host->op[1] & 1)
     return -1;
   host->ready = 1;
+  if (hcc & (1U << 3)) {
+    for (unsigned int p = 1; p <= host->ports; p++)
+      if (!(port_status(p) & (1U << 9)))
+        port_write(p, 1U << 9);
+    usb_delay_ms(100);
+  }
   return 0;
 }
 static void start(void) {
@@ -684,8 +747,11 @@ static void start(void) {
           if (!bar)
             continue;
           pci_enable(b, s, f);
-          if (!initialize(bar & ~15U, host_count))
+          if (!initialize(bar & ~15U, host_count)) {
+            host_ids[host_count] = pci(b, s, f, 0);
+            route_intel_ports(b, s, f);
             host_count++;
+          }
         }
     }
 }
@@ -693,7 +759,9 @@ int usb_xhci_controller_count(void) {
   start();
   return host_count;
 }
-int usb_xhci_poll(void) {
+/* maintain: also handle port changes and rescan hubs. Hub scans issue one
+ * synchronous control transfer per port, so games poll without them. */
+static int poll(int maintain) {
   start();
   BarnixMouse before;
   mouse_get(&before);
@@ -702,7 +770,7 @@ int usb_xhci_poll(void) {
     if (!host->ready)
       continue;
     events();
-    for (unsigned int p = 1; p <= host->ports; p++) {
+    for (unsigned int p = 1; maintain && p <= host->ports; p++) {
       unsigned int state = port_status(p), slot = child_slot(0, p);
       if (!(state & 1) || (state & (1U << 17))) {
         if (slot)
@@ -712,15 +780,24 @@ int usb_xhci_poll(void) {
       }
       if (state & (0x7fU << 17))
         port_write(p, state & (0x7fU << 17));
-      if ((state & 1) && !slot && !(host->seen_ports & (1U << (p - 1)))) {
+      if ((state & 1) && !slot &&
+          !(host->seen_ports & (1U << (p - 1))) &&
+          (int)(host->poll_counter - host->port_retry_at[p - 1]) >= 0) {
         host->seen_ports |= 1U << (p - 1);
         int speed = reset_port(p);
-        if (speed > 0)
-          attach(p, 0, 0, speed);
-        host->seen_ports |= 1U << (p - 1);
+        int slot = speed > 0 ? attach(p, 0, 0, speed) : -1;
+        if (slot < 1) {
+          if (host->port_retries[p - 1] < 3) {
+            host->port_retries[p - 1]++;
+            host->port_retry_at[p - 1] = host->poll_counter + 128;
+            host->seen_ports &= ~(1U << (p - 1));
+          }
+        } else {
+          host->port_retries[p - 1] = 0;
+        }
       }
     }
-    if (!(host->poll_counter++ & 127))
+    if (maintain && !(host->poll_counter++ & 127))
       for (unsigned int n = 1; n <= SLOTS; n++)
         if (host->devices[n].active && host->devices[n].hub_ports)
           scan_hub(n);
@@ -728,11 +805,11 @@ int usb_xhci_poll(void) {
       Device *v = &host->devices[n];
       if (!v->active || !v->mouse || v->pending)
         continue;
-      if (v->result < 0) {
-        disconnect(n);
+      if (v->result < 0 && !recover_mouse(n))
         continue;
-      }
       if (v->bytes) {
+        v->reports++;
+        v->error_run = 0;
         if (!v->boot_mouse)
           hid_mouse_report(&v->hid, 48 + h * SLOTS + n - 1, v->report,
                            v->bytes);
@@ -752,6 +829,8 @@ int usb_xhci_poll(void) {
   mouse_get(&after);
   return before.sequence != after.sequence;
 }
+int usb_xhci_poll(void) { return poll(1); }
+int usb_xhci_poll_reports(void) { return poll(0); }
 
 /* Bulk transfers use a page-aligned bounce buffer: a Normal TRB must not
  * cross a 64 KiB boundary, and callers need not supply DMA-safe memory. */
@@ -936,5 +1015,60 @@ void usb_xhci_diagnostics(void) {
     print(WHITE, " (unavailable ports/hosts: ");
     print_uint(WHITE, failed);
     print(WHITE, ")");
+  }
+}
+
+static void hex4(unsigned int value) {
+  char text[5];
+  for (int i = 0; i < 4; i++)
+    text[i] = "0123456789abcdef"[value >> (12 - 4 * i) & 15];
+  text[4] = 0;
+  print(WHITE, text);
+}
+/* One line per controller and per connected port, for real-hardware reports. */
+void usb_xhci_details(void) {
+  start();
+  static const char *const speeds[] = {"?", "full", "low", "high", "super", "super+", "super+", "super+"};
+  for (int h = 0; h < host_count; h++) {
+    host = &hosts[h];
+    print(WHITE, "  xHCI ");
+    hex4(host_ids[h] & 0xffff); print(WHITE, ":"); hex4(host_ids[h] >> 16);
+    print(WHITE, host->ready ? ", ports " : ", halted, ports ");
+    print_uint(WHITE, host->ports);
+    println(WHITE, routed_ports ? " (Intel ports switched from EHCI)" : "");
+    if (!host->ready)
+      continue;
+    for (unsigned int p = 1; p <= host->ports; p++) {
+      unsigned int state = port_status(p);
+      if (!(state & 1))
+        continue;
+      print(WHITE, "    port ");
+      print_uint(WHITE, p);
+      print(WHITE, ": ");
+      print(WHITE, speeds[(state >> 10) & 7]);
+      print(WHITE, " speed");
+      unsigned int slot = child_slot(0, p);
+      if (!slot) {
+        println(YELLOW, ", not configured (unsupported or failed)");
+        continue;
+      }
+      for (unsigned int n = 1; n <= SLOTS; n++) {
+        Device *v = &host->devices[n];
+        if (!v->active || v->port != p)
+          continue;
+        if (v->parent) { print(WHITE, "\n      behind hub, port "); print_uint(WHITE, v->parent_port); }
+        print(WHITE, ", ");
+        hex4(v->vid); print(WHITE, ":"); hex4(v->pid);
+        int was_mouse = v->mouse || v->reports || v->errors;
+        print(WHITE, was_mouse ? (v->mouse ? " mouse" : " mouse (stopped)") : v->storage ? " storage" : v->hub_ports ? " hub" : " other");
+        if (was_mouse) {
+          print(WHITE, v->boot_mouse ? " boot" : " report");
+          print(WHITE, ", reports "); print_uint(WHITE, v->reports);
+          print(v->errors ? YELLOW : WHITE, ", errors "); print_uint(v->errors ? YELLOW : WHITE, v->errors);
+          if (v->errors) { print(YELLOW, " (code "); print_uint(YELLOW, v->last_code); print(YELLOW, ")"); }
+        }
+      }
+      println(WHITE, "");
+    }
   }
 }

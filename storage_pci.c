@@ -1,6 +1,8 @@
 #include "storage_pci.h"
+#include "disk.h"
 #include "barnix.h"
 #include "linux_memory.h"
+#include "linux_limits.h"
 
 /* Polling drivers with identity-mapped DMA below 4 GiB. All transfers are
  * synchronous; IRQ/MSI, IOMMU and controller hotplug are not required. */
@@ -58,10 +60,11 @@ static uint64_t bar_size(unsigned int pci, unsigned int bar, unsigned int value)
     pci_command(pci, command);
     return ~mask + 1;
 }
-void storage_pci_boot_memory(const MultibootInfo *info)
+void storage_pci_boot_memory(const MultibootInfo *info, void (*progress)(unsigned int bus))
 {
     if (!info || !(info->flags & (1U << 6)) || !info->mmap_addr || info->mmap_length > 65536) return;
     pci_allocator_ready = 1;
+    pci_reserved_count = 0;   /* again from the start: the framebuffer move scans early */
     if (info->flags & (1U << 12)) reserve_mmio(info->framebuffer_low | ((uint64_t)info->framebuffer_high << 32),
                                             (uint64_t)info->framebuffer_pitch * info->framebuffer_height);
     for (unsigned int off = 0; off < info->mmap_length;) {
@@ -72,7 +75,9 @@ void storage_pci_boot_memory(const MultibootInfo *info)
         reserve_mmio(record[1] | ((uint64_t)record[2] << 32), record[3] | ((uint64_t)record[4] << 32));
         off += record[0] + 4;
     }
-    for (unsigned int bus = 0; bus < 256; bus++) for (unsigned int slot = 0; slot < 32; slot++) {
+    for (unsigned int bus = 0; bus < 256; bus++) {
+        if (progress && !(bus & 15)) progress(bus);
+        for (unsigned int slot = 0; slot < 32; slot++) {
         unsigned int base = (bus << 16) | (slot << 11);
         if ((pci_read(base, 0) & 65535) == 65535) continue;
         unsigned int functions = pci_read(base, 12) & 0x800000 ? 8 : 1;
@@ -101,7 +106,113 @@ void storage_pci_boot_memory(const MultibootInfo *info)
                 if (end > start) reserve_mmio(start, end - start);
             }
         }
+        }
     }
+    /* Large Linux programs (Python, GCC) live at this virtual window; moved
+     * BARs must not land there (storage_pci_clear_large_window). */
+    reserve_mmio(LINUX_LARGE_BASE, LINUX_LARGE_ARENA_SIZE);
+}
+/* A free, size-aligned window below 4 GiB for a BAR of size bytes, or 0. */
+static uint64_t low_window(uint64_t size, uint64_t from)
+{
+    uint64_t candidate = (from + size - 1) & ~(size - 1);
+    for (;;) {
+        int collision = 0;
+        if (candidate + size > 0xf0000000ULL) return 0;
+        for (unsigned int i = 0; i < pci_reserved_count; i++)
+            if (candidate < pci_reserved[i].end && candidate + size > pci_reserved[i].first) {
+                candidate = (pci_reserved[i].end + size - 1) & ~(size - 1);
+                collision = 1; break;
+            }
+        if (!collision) return candidate;
+    }
+}
+/* UEFI may leave the GOP framebuffer in a 64-bit BAR above 4 GiB (the
+ * graphics aperture of Intel laptops such as Alder Lake ones), where a
+ * 32-bit kernel cannot reach it. The root-bus BAR that holds it moves to a
+ * free window below 4 GiB; the picture stays at the same offset. force
+ * moves it even when it is low (testing). Returns the new address or 0. */
+uint64_t storage_pci_lower_framebuffer(uint64_t address, int force)
+{
+    if (!pci_allocator_ready) return 0;
+    for (unsigned int slot = 0; slot < 32; slot++) {
+        unsigned int base = slot << 11;
+        if ((pci_read(base, 0) & 65535) == 65535) continue;
+        unsigned int functions = pci_read(base, 12) & 0x800000 ? 8 : 1;
+        for (unsigned int f = 0; f < functions; f++) {
+            unsigned int pci = base | (f << 8);
+            if ((pci_read(pci, 0) & 65535) == 65535 || ((pci_read(pci, 12) >> 16) & 127)) continue;
+            for (unsigned int b = 0; b < 6; b++) {
+                unsigned int value = pci_read(pci, 0x10 + b * 4);
+                if (!value || (value & 1)) continue;
+                int wide = (value & 6) == 4;
+                uint64_t start = value & ~15U, size = bar_size(pci, b, value);
+                unsigned int high = wide && b < 5 ? pci_read(pci, 0x14 + b * 4) : 0;
+                start |= (uint64_t)high << 32;
+                if (!size || (size & (size - 1)) || address < start || address >= start + size) { if (wide) b++; continue; }
+                int in_window = !high && start < LINUX_LARGE_BASE + (uint64_t)LINUX_LARGE_ARENA_SIZE && start + size > LINUX_LARGE_BASE;
+                if (!high && !force && !in_window) return 0;   /* already reachable */
+                if (size > 0x40000000ULL || (high && !wide)) return 0;
+                uint64_t target = low_window(size, 0x40000000ULL);
+                if (!target || target == start) return 0;
+                unsigned short command = pci_read(pci, 4);
+                pci_command(pci, command & ~7U);       /* no decoding while it moves */
+                pci_write(pci, 0x10 + b * 4, (unsigned int)target | (value & 15));
+                if (wide) pci_write(pci, 0x14 + b * 4, 0);
+                int moved = (pci_read(pci, 0x10 + b * 4) & ~15U) == target && (!wide || !pci_read(pci, 0x14 + b * 4));
+                if (!moved) { pci_write(pci, 0x10 + b * 4, value); if (wide) pci_write(pci, 0x14 + b * 4, high); }
+                pci_command(pci, command | 2U);
+                if (!moved) return 0;
+                reserve_mmio(target, size);
+                return target + (address - start);
+            }
+        }
+    }
+    return 0;
+}
+/* UEFI with little RAM (QEMU's OVMF at 512 MiB) starts PCI memory at
+ * 0x80000000: the window where large Linux programs (Python, GCC) are
+ * mapped. Device registers there would replace the program's pages, so
+ * root-bus BARs move to a free place below 4 GiB. Returns how many stay. */
+int storage_pci_clear_large_window(void)
+{
+    if (!pci_allocator_ready) return -1;
+    const uint64_t first = LINUX_LARGE_BASE, end = first + LINUX_LARGE_ARENA_SIZE;
+    int stuck = 0;
+    for (unsigned int bus = 0; bus < 256; bus++)
+    for (unsigned int slot = 0; slot < 32; slot++) {
+        unsigned int base = (bus << 16) | (slot << 11);
+        if ((pci_read(base, 0) & 65535) == 65535) continue;
+        unsigned int functions = pci_read(base, 12) & 0x800000 ? 8 : 1;
+        for (unsigned int f = 0; f < functions; f++) {
+            unsigned int pci = base | (f << 8);
+            if ((pci_read(pci, 0) & 65535) == 65535) continue;
+            unsigned int header = (pci_read(pci, 12) >> 16) & 127;
+            unsigned int bars = header == 0 ? 6 : header == 1 ? 2 : 0;
+            for (unsigned int b = 0; b < bars; b++) {
+                unsigned int value = pci_read(pci, 0x10 + b * 4);
+                if (!value || (value & 1)) continue;
+                int wide = (value & 6) == 4;
+                if (wide && b + 1 == bars) continue;
+                unsigned int high = wide ? pci_read(pci, 0x14 + b * 4) : 0;
+                uint64_t start = value & ~15U, size = bar_size(pci, b, value);
+                if (high || !size || (size & (size - 1)) || start >= end || start + size <= first) { if (wide) b++; continue; }
+                /* behind a bridge a BAR must stay inside the bridge's window */
+                uint64_t target = bus || size > 0x10000000ULL ? 0 : low_window(size, 0x40000000ULL);
+                if (!target) { stuck++; if (wide) b++; continue; }
+                unsigned short command = pci_read(pci, 4);
+                pci_command(pci, command & ~7U);
+                pci_write(pci, 0x10 + b * 4, (unsigned int)target | (value & 15));
+                if (wide) pci_write(pci, 0x14 + b * 4, 0);
+                int moved = (pci_read(pci, 0x10 + b * 4) & ~15U) == target;
+                if (!moved) pci_write(pci, 0x10 + b * 4, value);
+                pci_command(pci, command);
+                if (moved) reserve_mmio(target, size); else stuck++;
+                if (wide) b++;
+            }
+        }
+    }
+    return stuck;
 }
 unsigned int storage_pci_mmio_bar(unsigned int pci, unsigned int bar)
 {
@@ -421,16 +532,37 @@ static int native_io(Device *d, unsigned int lba, void *data, unsigned int count
 {
     if (d->kind == SATA) return ahci_command(d, write ? 0x35 : 0x25, lba, count, data, count << d->sector_shift, write);
     if (d->kind == VIRTIO) return virtio_request(d, lba, data, count * 512, write, 0);
+    /* PRP1 must be dword aligned and covers only up to the end of its page;
+     * the rest of a buffer that crosses a page goes in PRP2 (count <= 8, so
+     * at most two pages). Misaligned buffers go through the bounce page. */
+    unsigned int address = (unsigned int)data, bytes = count << d->sector_shift;
+    if ((address & 3) && data != bounce) {
+        if (write) memcpy(bounce, data, bytes);
+        if (native_io(d, lba, bounce, count, write)) return -1;
+        if (!write) memcpy(data, bounce, bytes);
+        return 0;
+    }
     unsigned int cmd[16] = {0}; cmd[0] = write ? 1 : 2; cmd[1] = d->nsid;
-    cmd[6] = (unsigned int)data; cmd[10] = lba; cmd[12] = count - 1;
+    cmd[6] = address; cmd[10] = lba; cmd[12] = count - 1;
+    if ((address & 4095) + bytes > 4096) cmd[8] = (address & ~4095U) + 4096;
     return nvme_command(&nvme[d->controller], 1, cmd);
 }
 static int transfer(int index, unsigned int lba, void *data, unsigned int sectors, int write)
 {
-    if (!storage_pci_present(index) || !sectors || sectors > 8) return -1;
+    if (!storage_pci_present(index) || !sectors || sectors > DISK_MAX_WRITE_SECTORS) return -1;
     Device *d = &devices[index];
     if ((uint64_t)lba + sectors > d->sectors || (write && d->readonly)) return -1;
     unsigned int ratio = 1U << (d->sector_shift - 9);
+    if (ratio == 1) {
+        unsigned char *bytes = data;
+        unsigned int max_native = d->kind == NVME ? 8 : sectors;
+        while (sectors) {
+            unsigned int count = sectors > max_native ? max_native : sectors;
+            if (native_io(d, lba, bytes, count, write)) return -1;
+            lba += count; bytes += count * DISK_SECTOR_SIZE; sectors -= count;
+        }
+        return 0;
+    }
     unsigned char *bytes = data;
     while (sectors) {
         unsigned int native = lba / ratio, offset = lba % ratio, count = ratio - offset;

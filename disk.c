@@ -1,10 +1,9 @@
 #include "lang.h"
 #include "disk.h"
+#include "wifi_iwl.h"
 #include "barnix.h"
 #include "usb_storage.h"
 #include "storage_pci.h"
-
-#define DISK_SECTORS 4096
 
 #define ATA_DATA (ata_base + 0)
 #define ATA_SECCOUNT (ata_base + 2)
@@ -24,11 +23,14 @@
 #define ATA_SR_DRQ 0x08
 #define ATA_SR_BSY 0x80
 
-static unsigned char ram_disk[DISK_SECTORS][DISK_SECTOR_SIZE];
+static unsigned char (*ram_disk)[DISK_SECTOR_SIZE];
+static unsigned int ram_sectors;
 static int ram_ready;
 static DiskSelection selected = {DISK_NONE, 0, 0, 0};
 static uint64_t ata_capacity[4];
 static unsigned char ata_lba48[4];
+static unsigned char ata_multiple[4];
+static unsigned char ata_dma[4];        /* drive reports DMA; cleared after a DMA failure */   /* sectors per DRQ block (READ/WRITE MULTIPLE), 0 = off */
 static int ata_unit;
 #define ata_sectors ata_capacity[ata_unit]
 #define ata_base (ata_unit < 2 ? 0x1F0 : 0x170)
@@ -64,6 +66,18 @@ static inline unsigned short inw(unsigned short port)
     unsigned short value;
     __asm__ volatile("inw %1, %0" : "=a"(value) : "Nd"(port));
     return value;
+}
+
+static inline unsigned int inl(unsigned short port)
+{
+    unsigned int value;
+    __asm__ volatile("inl %1, %0" : "=a"(value) : "Nd"(port));
+    return value;
+}
+
+static inline void outl(unsigned short port, unsigned int value)
+{
+    __asm__ volatile("outl %0, %1" : : "a"(value), "Nd"(port));
 }
 
 static inline void outw(unsigned short port, unsigned short value)
@@ -106,11 +120,21 @@ static int ata_select_drive(void)
     return ata_wait_not_busy();
 }
 
+/* CD/DVD drives (ATAPI) answer with a packet signature: Barnix leaves them
+ * alone, so they are not woken up by every disk scan. */
+static unsigned char ata_packet[4];
+static int ata_is_packet(void)
+{
+    unsigned char mid = inb(ATA_LBA_MID), high = inb(ATA_LBA_HIGH);
+    return (mid == 0x14 && high == 0xEB) || (mid == 0x69 && high == 0x96);
+}
 static int ata_identify(void)
 {
     ata_sectors = 0;
+    if (ata_packet[ata_unit]) return -1;
     if (ata_select_drive() != 0)
         return -1;
+    if (ata_is_packet()) { ata_packet[ata_unit] = 1; return -1; }
 
     outb(ATA_SECCOUNT, 0);
     outb(ATA_LBA_LOW, 0);
@@ -123,7 +147,10 @@ static int ata_identify(void)
         return -1;
 
     if (ata_wait_drq() != 0)
+    {
+        if (ata_is_packet()) ata_packet[ata_unit] = 1;
         return -1;
+    }
 
     unsigned short identity[256];
     for (int i = 0; i < 256; i++)
@@ -135,11 +162,36 @@ static int ata_identify(void)
     /* This PIO path uses 512-byte logical sectors; AHCI also supports 4Kn. */
     if ((identity[106] & 0xd000) == 0x5000 && (identity[117] != 256 || identity[118])) return -1;
     if (!ata_sectors) return -1;
+    ata_dma[ata_unit] = !!(identity[49] & (1U << 8));
+    /* SET MULTIPLE MODE: one DRQ block (one emulator round trip) per up to
+     * 16 sectors instead of one per sector. Drives that refuse keep PIO. */
+    unsigned int multiple = identity[47] & 0xFF;
+    if (multiple > 16) multiple = 16;
+    while (multiple & (multiple - 1)) multiple &= multiple - 1;
+    ata_multiple[ata_unit] = 0;
+    if (multiple > 1) {
+        outb(ATA_SECCOUNT, multiple);
+        outb(ATA_COMMAND, 0xC6);
+        if (ata_wait_not_busy() == 0 && !(inb(ATA_STATUS) & 0x21)) ata_multiple[ata_unit] = multiple;
+    }
 
     return 0;
 }
 
-static int ata_prepare_lba(unsigned int lba)
+/* One command moves up to 256 sectors; the ext2 layer flushes explicitly. */
+#define ATA_MAX_SECTORS 256U
+static inline void ata_read_words(void *buffer, unsigned int sectors)
+{
+    unsigned int words = sectors * 256;
+    __asm__ volatile("cld; rep insw" : "+D"(buffer), "+c"(words) : "d"((unsigned short)ATA_DATA) : "memory");
+}
+static inline void ata_write_words(const void *buffer, unsigned int sectors)
+{
+    unsigned int words = sectors * 256;
+    __asm__ volatile("cld; rep outsw" : "+S"(buffer), "+c"(words) : "d"((unsigned short)ATA_DATA) : "memory");
+}
+
+static int ata_prepare_lba(unsigned int lba, unsigned int count)
 {
     if (!ata_lba48[ata_unit] && lba >= (1U << 28))
         return -1;
@@ -149,56 +201,144 @@ static int ata_prepare_lba(unsigned int lba)
 
     outb(ATA_DRIVE, 0xE0 | ata_slave | (ata_lba48[ata_unit] ? 0 : ((lba >> 24) & 0x0F)));
     if (ata_lba48[ata_unit]) {
-        outb(ATA_SECCOUNT, 0); outb(ATA_LBA_LOW, lba >> 24);
+        outb(ATA_SECCOUNT, count >> 8); outb(ATA_LBA_LOW, lba >> 24);
         outb(ATA_LBA_MID, 0); outb(ATA_LBA_HIGH, 0);
     }
-    outb(ATA_SECCOUNT, 1);
+    outb(ATA_SECCOUNT, count & 0xFF);   /* 0 means 256 sectors in LBA28 */
     outb(ATA_LBA_LOW, lba & 0xFF);
     outb(ATA_LBA_MID, (lba >> 8) & 0xFF);
     outb(ATA_LBA_HIGH, (lba >> 16) & 0xFF);
     return 0;
 }
 
-static int ata_read(unsigned int lba, void *buffer)
+/* Bus Master IDE DMA (PIIX/ICH-style controllers in compatibility mode).
+ * PIO moves every 16-bit word through the CPU; under a hypervisor each word
+ * is a VM exit, which made installing GCC take most of an hour. One PRD entry
+ * covers a 64 KiB bounce buffer, so callers' buffers need no special memory. */
+#define ATA_DMA_MAX_SECTORS 128U
+static unsigned short ata_bm_base;   /* 0: no bus master controller found */
+static int ata_bm_probed;
+static unsigned int ata_prd[2] __attribute__((aligned(8)));
+static unsigned char ata_dma_buffer[ATA_DMA_MAX_SECTORS * 512] __attribute__((aligned(65536)));
+static unsigned int ata_pci_read(unsigned int pci, unsigned int reg)
 {
-    if (lba >= ata_sectors)
+    outl(0xCF8, 0x80000000U | pci | (reg & 0xFC));
+    return inl(0xCFC);
+}
+static void ata_bm_probe(void)
+{
+    ata_bm_probed = 1;
+    for (unsigned int bus = 0; bus < 8; bus++)
+        for (unsigned int slot = 0; slot < 32; slot++)
+            for (unsigned int fn = 0; fn < 8; fn++) {
+                unsigned int pci = bus << 16 | slot << 11 | fn << 8;
+                unsigned int id = ata_pci_read(pci, 0);
+                if ((id & 0xFFFF) == 0xFFFF) { if (!fn) break; continue; }
+                unsigned int class = ata_pci_read(pci, 8);
+                /* IDE controller, both channels on legacy ports, bus-master capable. */
+                if ((class >> 16) != 0x0101 || (class & 0x0500) || !(class & 0x8000)) {
+                    if (!fn && !(ata_pci_read(pci, 12) & 0x800000)) break;
+                    continue;
+                }
+                unsigned int bar = ata_pci_read(pci, 0x20);
+                if (!(bar & 1) || !(bar & 0xFFFC)) continue;
+                outl(0xCF8, 0x80000004U | pci);
+                outl(0xCFC, (inl(0xCFC) & 0xFFFF) | 0x05);   /* I/O space + bus master */
+                ata_bm_base = bar & 0xFFFC;
+                return;
+            }
+}
+static int ata_dma_transfer(unsigned int lba, void *buffer, unsigned int count, int write)
+{
+    unsigned short bm = ata_bm_base + (ata_unit < 2 ? 0 : 8);
+    unsigned int bytes = count * 512;
+    if (write) memcpy(ata_dma_buffer, buffer, bytes);
+    ata_prd[0] = (unsigned int)ata_dma_buffer;
+    ata_prd[1] = 0x80000000U | (bytes & 0xFFFF);   /* 0 means 64 KiB */
+    outb(bm, 0);
+    outl(bm + 4, (unsigned int)ata_prd);
+    outb(bm + 2, inb(bm + 2) | 0x06);               /* clear interrupt and error */
+    outb(bm, write ? 0x00 : 0x08);                  /* 0x08: device to memory */
+    if (ata_prepare_lba(lba, count) != 0)
+        return -1;
+    outb(ATA_COMMAND, write ? (ata_lba48[ata_unit] ? 0x35 : 0xCA) : (ata_lba48[ata_unit] ? 0x25 : 0xC8));
+    outb(bm, inb(bm) | 0x01);
+    int result = -1;
+    for (unsigned int i = 0; i < 50000000U; i++) {
+        unsigned char status = inb(bm + 2);
+        if (status & 0x02) break;
+        if (!(status & 0x01) || (status & 0x04)) {
+            result = ata_wait_not_busy() || (inb(ATA_STATUS) & 0x21) ? -1 : 0;
+            break;
+        }
+    }
+    outb(bm, 0);
+    outb(bm + 2, inb(bm + 2) | 0x06);
+    if (!result && !write) memcpy(buffer, ata_dma_buffer, bytes);
+    return result;
+}
+/* DMA when available; any failure turns it off for that drive and the
+ * transfer is repeated with PIO. */
+static int ata_try_dma(unsigned int lba, void *buffer, unsigned int count, int write)
+{
+    if (!ata_dma[ata_unit] || count > ATA_DMA_MAX_SECTORS) return -1;
+    if (!ata_bm_probed) ata_bm_probe();
+    if (!ata_bm_base) return -1;
+    if (!ata_dma_transfer(lba, buffer, count, write)) return 0;
+    ata_dma[ata_unit] = 0;
+    return -1;
+}
+
+static int ata_read(unsigned int lba, void *buffer, unsigned int count)
+{
+    if (!count || count > ATA_MAX_SECTORS || lba >= ata_sectors || count > ata_sectors - lba)
+        return -1;
+    if (!ata_try_dma(lba, buffer, count, 0))
+        return 0;
+
+    if (ata_prepare_lba(lba, count) != 0)
         return -1;
 
-    if (ata_prepare_lba(lba) != 0)
-        return -1;
-
-    outb(ATA_COMMAND, ata_lba48[ata_unit] ? 0x24 : ATA_CMD_READ);
-    if (ata_wait_drq() != 0)
-        return -1;
-
-    unsigned short *words = (unsigned short *)buffer;
-    for (int i = 0; i < 256; i++)
-        words[i] = inw(ATA_DATA);
+    unsigned int block = ata_multiple[ata_unit] ? ata_multiple[ata_unit] : 1;
+    outb(ATA_COMMAND, ata_multiple[ata_unit] ? (ata_lba48[ata_unit] ? 0x29 : 0xC4)
+                                             : (ata_lba48[ata_unit] ? 0x24 : ATA_CMD_READ));
+    unsigned char *bytes = buffer;
+    for (unsigned int done = 0; done < count;) {
+        unsigned int n = count - done < block ? count - done : block;
+        if (ata_wait_drq() != 0)
+            return -1;
+        ata_read_words(bytes, n);
+        done += n; bytes += n * 512;
+    }
 
     return 0;
 }
 
-static int ata_write(unsigned int lba, const void *buffer)
+static int ata_write(unsigned int lba, const void *buffer, unsigned int count)
 {
-    if (lba >= ata_sectors)
+    if (!count || count > ATA_MAX_SECTORS || lba >= ata_sectors || count > ata_sectors - lba)
+        return -1;
+    if (!ata_try_dma(lba, (void *)buffer, count, 1))
+        return 0;
+
+    if (ata_prepare_lba(lba, count) != 0)
         return -1;
 
-    if (ata_prepare_lba(lba) != 0)
-        return -1;
-
-    outb(ATA_COMMAND, ata_lba48[ata_unit] ? 0x34 : ATA_CMD_WRITE);
-    if (ata_wait_drq() != 0)
-        return -1;
-
-    const unsigned short *words = (const unsigned short *)buffer;
-    for (int i = 0; i < 256; i++)
-        outw(ATA_DATA, words[i]);
+    unsigned int block = ata_multiple[ata_unit] ? ata_multiple[ata_unit] : 1;
+    outb(ATA_COMMAND, ata_multiple[ata_unit] ? (ata_lba48[ata_unit] ? 0x39 : 0xC5)
+                                             : (ata_lba48[ata_unit] ? 0x34 : ATA_CMD_WRITE));
+    const unsigned char *bytes = buffer;
+    for (unsigned int done = 0; done < count;) {
+        unsigned int n = count - done < block ? count - done : block;
+        if (ata_wait_drq() != 0)
+            return -1;
+        ata_write_words(bytes, n);
+        done += n; bytes += n * 512;
+    }
 
     if (ata_wait_not_busy() != 0)
         return -1;
-
-    outb(ATA_COMMAND, ata_lba48[ata_unit] ? 0xea : ATA_CMD_FLUSH);
-    return ata_wait_not_busy();
+    return (inb(ATA_STATUS) & 0x21) ? -1 : 0;
 }
 
 static int raw_read(int id, unsigned int lba, void *buffer, unsigned int count)
@@ -208,11 +348,9 @@ static int raw_read(int id, unsigned int lba, void *buffer, unsigned int count)
     if (is_ata(id))
     {
         ata_use(id);
-        for (unsigned int i = 0; i < count; i++)
-            if (ata_read(lba + i, (unsigned char *)buffer + i * 512)) return -1;
-        return 0;
+        return ata_read(lba, buffer, count);
     }
-    if (id == DISK_RAM && ram_ready && lba < DISK_SECTORS && count <= DISK_SECTORS - lba)
+    if (id == DISK_RAM && ram_ready && lba < ram_sectors && count <= ram_sectors - lba)
     { memcpy(buffer, ram_disk[lba], count * 512); return 0; }
     return -1;
 }
@@ -237,7 +375,7 @@ static int select_device(const char *name, int raw)
         next.id = ata_id(ata_unit); physical = ata_sectors > 0xffffffffU ? 0xffffffffU : (unsigned int)ata_sectors;
     }
     else if (strcmp(name, "ram0") == 0 && ram_ready)
-    { next.id = DISK_RAM; physical = DISK_SECTORS; }
+    { next.id = DISK_RAM; physical = ram_sectors; }
     else {
         storage_pci_init();
         for (int i = 0; i < storage_pci_count(); i++) if (!strcmp(name, storage_pci_name(i)) && storage_pci_present(i)) {
@@ -288,11 +426,15 @@ static int select_named(const char *name,int raw) {
 int disk_select(const char *name) { return select_named(name, 0); }
 int disk_select_raw(const char *name) { return select_named(name, 1); }
 int disk_init(void) { return disk_select("ata0"); }
-int disk_init_from_memory(const void *data, unsigned int size)
+int disk_init_from_memory(void *data, unsigned int size)
 {
-    if (!data || size != sizeof(ram_disk)) return -1;
-    memcpy(ram_disk, data, size); ram_ready = 1;
-    selected = (DiskSelection){DISK_RAM, 0, DISK_SECTORS, 0};
+    if (!data || !size || size % DISK_SECTOR_SIZE ||
+        (uintptr_t)data > UINTPTR_MAX - size) return -1;
+    /* GRUB modules are writable RAM, reserved by memory_init for the entire
+     * boot. Use that storage directly instead of imposing a fixed image size
+     * or allocating a second copy of the live filesystem. */
+    ram_disk = data; ram_sectors = size / DISK_SECTOR_SIZE; ram_ready = 1;
+    selected = (DiskSelection){DISK_RAM, 0, ram_sectors, 0};
     return 0;
 }
 DiskSelection disk_selection(void) { return selected; }
@@ -316,19 +458,43 @@ int disk_present(void)
 }
 int disk_read_many(unsigned int lba, void *buffer, unsigned int count)
 {
-    if (!disk_present() || !count || count > 8 || lba >= selected.sectors ||
+    if (!disk_present() || !count || count > DISK_MAX_WRITE_SECTORS || lba >= selected.sectors ||
         count > selected.sectors - lba) return -1;
+    if (is_usb(selected.id)) {
+        unsigned char *bytes = buffer;
+        while (count) {
+            unsigned int batch = count > 8 ? 8 : count;
+            if (raw_read(selected.id, lba + selected.offset, bytes, batch)) return -1;
+            lba += batch; bytes += batch * DISK_SECTOR_SIZE; count -= batch;
+        }
+        return 0;
+    }
     return raw_read(selected.id, lba + selected.offset, buffer, count);
 }
 int disk_read(unsigned int lba, void *buffer) { return disk_read_many(lba, buffer, 1); }
-int disk_write(unsigned int lba, const void *buffer)
+unsigned int disk_writes;
+int disk_write_many(unsigned int lba, const void *buffer, unsigned int count)
 {
-    if (!disk_present() || lba >= selected.sectors) return -1;
-    if (selected.id >= DISK_PCI_BASE) return storage_pci_write(selected.id - DISK_PCI_BASE, lba + selected.offset, buffer, 1);
-    if (is_usb(selected.id)) return usb_storage_write(lba + selected.offset, buffer, 1);
-    if (is_ata(selected.id)) return ata_write(lba + selected.offset, buffer);
-    memcpy(ram_disk[lba], buffer, 512); return 0;
+    disk_writes++;
+    if (!disk_present() || !count || count > DISK_MAX_WRITE_SECTORS || lba >= selected.sectors || count > selected.sectors - lba) return -1;
+    if (selected.id >= DISK_PCI_BASE) return storage_pci_write(selected.id - DISK_PCI_BASE, lba + selected.offset, buffer, count);
+    if (is_usb(selected.id)) {
+        const unsigned char *bytes = buffer;
+        while (count) {
+            unsigned int batch = count > 8 ? 8 : count;
+            if (usb_storage_write(lba + selected.offset, bytes, batch)) return -1;
+            lba += batch; bytes += batch * DISK_SECTOR_SIZE; count -= batch;
+        }
+        return 0;
+    }
+    if (is_ata(selected.id)) {
+        return ata_write(lba + selected.offset, buffer, count);
+    }
+    if (selected.id != DISK_RAM || selected.offset >= ram_sectors ||
+        lba >= ram_sectors - selected.offset || count > ram_sectors - selected.offset - lba) return -1;
+    memcpy(ram_disk[lba + selected.offset], buffer, count * 512); return 0;
 }
+int disk_write(unsigned int lba, const void *buffer) { return disk_write_many(lba, buffer, 1); }
 int disk_flush(void)
 {
     if (!disk_present()) return -1;
@@ -370,7 +536,7 @@ uint64_t disk_capacity(void)
     if (selected.id >= DISK_PCI_BASE) return storage_pci_capacity(selected.id - DISK_PCI_BASE);
     if (is_usb(selected.id)) { if (usb_storage_select(usb_unit(selected.id))) return 0; return usb_storage_sectors(); }
     if (is_ata(selected.id)) { ata_use(selected.id); return ata_sectors; }
-    return selected.id == DISK_RAM ? DISK_SECTORS : 0;
+    return selected.id == DISK_RAM ? ram_sectors : 0;
 }
 void disk_list(void)
 {
@@ -385,6 +551,7 @@ void disk_list(void)
         else { print(WHITE, " - "); println(WHITE, disk_type()); }
     }
     disk_restore(previous);
+    wifi_iwl_report();
 }
 void disk_info(void)
 {

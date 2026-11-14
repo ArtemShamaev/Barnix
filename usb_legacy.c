@@ -29,17 +29,32 @@ typedef struct {
   Ed ed __attribute__((aligned(16)));
   Ot td[2] __attribute__((aligned(16)));
   unsigned char dma[4096] __attribute__((aligned(4096)));
+  /* Never-executed heads of the interrupt lists; pipes hang behind them. */
+  EhciQh anchor __attribute__((aligned(64)));
+  Ed anchor_ed __attribute__((aligned(16)));
   volatile uint32_t *op;
   unsigned int kind, ports, first, live;
 } Host;
 typedef struct {
+  unsigned int host, port;
+} Port;
+/* An interrupt IN pipe (a mouse), any number per root port so several
+ * mice behind one hub all work. EHCI alternates two qTDs that point at
+ * each other: the controller waits on the inactive one, and software arms it
+ * while the other is being used, so the schedule never stops. OHCI appends
+ * to the ED's TD list the usual way, through the dummy tail TD. */
+#define PIPES 16
+#define PIPE_PACKET 512
+typedef struct {
   EhciQh qh __attribute__((aligned(64)));
-  Qtd qtd __attribute__((aligned(32)));
+  Qtd qtd[2] __attribute__((aligned(64)));
   Ed ed __attribute__((aligned(16)));
   Ot td[2] __attribute__((aligned(16)));
-  unsigned char dma[1024] __attribute__((aligned(4096)));
-  unsigned int host, port, pending;
-} Port;
+  unsigned char dma[2][PIPE_PACKET] __attribute__((aligned(4096)));
+  int port, used, started, current;
+  unsigned int status;
+} Pipe;
+static Pipe pipes[PIPES];
 static Host hosts[HOSTS];
 static Port ports[PORTS];
 static int initialized, nhost, nport;
@@ -223,27 +238,23 @@ static int initialize(unsigned int b, unsigned int s, unsigned int f,
     Port *p = &ports[nport++];
     p->host = nhost;
     p->port = n;
-    p->ed.flags = 1U << 14;
-    p->qh.overlay.next = p->qh.overlay.alt = 1;
-    p->qh.overlay.token = 1U << 6;
-    p->qh.link = 1;
   }
-  /* All interrupt endpoints are linked once; inactive entries remain skipped.
-   */
-  for (unsigned int n = h->first; n < (unsigned int)nport; n++) {
-    Port *p = &ports[n];
-    if (n + 1 < (unsigned int)nport) {
-      p->ed.next = (uint32_t)&ports[n + 1].ed;
-      p->qh.link = (uint32_t)&ports[n + 1].qh | 2;
-    }
-  }
+  /* Every frame visits the anchor; open pipes are linked behind it. An
+   * S-mask of zero means the controller never executes the anchor itself. */
+  h->anchor.link = 1;
+  h->anchor.ep = 0;
+  h->anchor.cap = 0;
+  h->anchor.overlay.next = h->anchor.overlay.alt = 1;
+  h->anchor.overlay.token = 1U << 6;
+  h->anchor_ed.flags = 1U << 14;
+  h->anchor_ed.next = 0;
   if (h->ports) {
     if (kind == 0x20) {
       for (int n = 0; n < 1024; n++)
-        h->frames[n] = (uint32_t)&ports[h->first].qh | 2;
+        h->frames[n] = (uint32_t)&h->anchor | 2;
     } else {
       for (int n = 0; n < 32; n++)
-        ((uint32_t *)h->hcca)[n] = (uint32_t)&ports[h->first].ed;
+        ((uint32_t *)h->hcca)[n] = (uint32_t)&h->anchor_ed;
       h->op[1] |= 4;
     }
   }
@@ -315,7 +326,9 @@ int usb_legacy_reset(int index) {
   volatile uint32_t *r = port_reg(p);
   if (!h->live || !(*r & 1))
     return -1;
-  usb_legacy_mouse_stop(index);
+  for (int n = 0; n < PIPES; n++)   /* a reset ends every pipe on the port */
+    if (pipes[n].used && pipes[n].port == index)
+      usb_legacy_pipe_close(n);
   usb_delay_ms(100);
   if (h->kind == 0x20) {
     ehci_port(r, 4, 1U << 8);
@@ -364,10 +377,39 @@ static void fill_ot(Ot *t, unsigned int pid, unsigned int toggle,
   t->end = length ? (uint32_t)data + length - 1 : 0;
   t->next = (uint32_t)(t + 1);
 }
+int usb_legacy_is_ehci(int index) {
+  if (index < 0 || index >= nport)
+    return -1;
+  return hosts[ports[index].host].kind == 0x20;
+}
+/* EHCI endpoint characteristics and capabilities (QH dwords 1 and 2). */
+static void ehci_route(EhciQh *qh, unsigned int address, unsigned int endpoint,
+                       unsigned int packet, unsigned int route, int head,
+                       int periodic) {
+  unsigned int speed = route & 3;
+  if (speed == USB_ROUTE_ROOT || speed == USB_SPEED_HIGH) {
+    qh->ep = address | (endpoint << 8) | (2U << 12) | (1U << 14) |
+             (head ? 1U << 15 : 0) | (packet << 16) | (periodic ? 0 : 4U << 28);
+    qh->cap = (1U << 30) | (periodic ? 1 : 0);
+    return;
+  }
+  /* Split transactions: no NAK reload, the control flag on endpoint 0,
+   * and for interrupt endpoints a start-split in micro-frame 0 with
+   * complete-splits in 2, 3 and 4. */
+  qh->ep = address | (endpoint << 8) | (speed << 12) | (1U << 14) |
+           (head ? 1U << 15 : 0) | (packet << 16) | (endpoint ? 0 : 1U << 27);
+  qh->cap = (1U << 30) | ((route >> 16 & 127) << 23) | ((route >> 8 & 127) << 16) |
+            (periodic ? (0x1cU << 8) | 1 : 0);
+}
+static unsigned int ohci_low(int index, unsigned int route) {
+  if ((route & 3) == USB_ROUTE_ROOT)
+    return (usb_legacy_status(index) & 0x100) ? 1U << 13 : 0;
+  return (route & 3) == USB_SPEED_LOW ? 1U << 13 : 0;
+}
 int usb_legacy_transfer(int index, unsigned int address, unsigned int endpoint,
                         unsigned int packet, unsigned int pid,
                         unsigned char *toggle, void *data,
-                        unsigned int length) {
+                        unsigned int length, unsigned int route) {
   if (index < 0 || index >= nport || !packet || length > 4096)
     return -1;
   Port *p = &ports[index];
@@ -382,9 +424,7 @@ int usb_legacy_transfer(int index, unsigned int address, unsigned int endpoint,
     if (async_schedule(h, 0))
       return -1;
     fill_qtd(&h->qtd, pid == 0x2d ? 2 : input ? 1 : 0, *toggle, h->dma, length);
-    h->qh.ep = address | (endpoint << 8) | (2U << 12) | (1U << 14) |
-               (1U << 15) | (packet << 16) | (4U << 28);
-    h->qh.cap = 1U << 30;
+    ehci_route(&h->qh, address, endpoint, packet, route, 1, 0);
     h->qh.current = 0;
     memset(&h->qh.overlay, 0, sizeof(Qtd));
     h->qh.overlay.next = (uint32_t)&h->qtd;
@@ -406,8 +446,7 @@ int usb_legacy_transfer(int index, unsigned int address, unsigned int endpoint,
     h->op[1] &= ~0x30U;
     usb_delay_ms(2);
     fill_ot(h->td, pid == 0x2d ? 0 : input ? 2 : 1, *toggle, h->dma, length);
-    h->ed.flags = address | (endpoint << 7) |
-                  ((usb_legacy_status(index) & 0x100) ? 1U << 13 : 0) |
+    h->ed.flags = address | (endpoint << 7) | ohci_low(index, route) |
                   (packet << 16);
     h->ed.tail = (uint32_t)&h->td[1];
     h->ed.head = (uint32_t)&h->td[0];
@@ -435,90 +474,179 @@ int usb_legacy_transfer(int index, unsigned int address, unsigned int endpoint,
     memcpy(data, h->dma, result);
   return result;
 }
-void usb_legacy_mouse_stop(int index) {
-  Port *p = &ports[index];
-  Host *h = &hosts[p->host];
-  if (!p->pending)
+static void fill_pipe_qtd(Pipe *p, int k, unsigned int toggle, unsigned int packet) {
+  Qtd *t = &p->qtd[k];
+  t->token = 0;
+  barrier();
+  t->next = (uint32_t)&p->qtd[k ^ 1];
+  t->alt = 1;
+  t->buffer[0] = (uint32_t)p->dma[k];
+  for (int n = 1; n < 5; n++)
+    t->buffer[n] = ((uint32_t)p->dma[k] & ~4095U) + n * 4096;
+  for (int n = 0; n < 5; n++)
+    t->high[n] = 0;
+  barrier();
+  /* The active bit goes last: the controller may be reading this qTD. */
+  t->token = (toggle << 31) | (packet << 16) | (3U << 10) | (1U << 8) | 128;
+}
+int usb_legacy_pipe(int index) {
+  if (index < 0 || index >= nport)
+    return -1;
+  Host *h = &hosts[ports[index].host];
+  if (!h->live)
+    return -1;
+  for (int n = 0; n < PIPES; n++) {
+    Pipe *p = &pipes[n];
+    if (p->used)
+      continue;
+    memset(p, 0, sizeof(*p));
+    p->used = 1;
+    p->port = index;
+    if (h->kind == 0x20) {
+      p->qh.overlay.next = p->qh.overlay.alt = 1;
+      p->qh.overlay.token = 1U << 6;
+      p->qh.link = h->anchor.link;
+      barrier();
+      h->anchor.link = (uint32_t)&p->qh | 2;
+    } else {
+      p->ed.flags = 1U << 14;
+      p->ed.next = h->anchor_ed.next;
+      barrier();
+      h->anchor_ed.next = (uint32_t)&p->ed;
+    }
+    return n;
+  }
+  return -1;
+}
+void usb_legacy_pipe_close(int pipe) {
+  if (pipe < 0 || pipe >= PIPES || !pipes[pipe].used)
     return;
+  Pipe *p = &pipes[pipe];
+  Host *h = &hosts[ports[p->port].host];
   if (h->kind == 0x20) {
-    if (h->live)
-      periodic_schedule(h, 0);
-    p->qh.overlay.token = 1U << 6;
-    p->qh.overlay.next = 1;
+    int on = h->live && !periodic_schedule(h, 0);
+    for (EhciQh *q = &h->anchor; !(q->link & 1); q = (EhciQh *)(q->link & ~31U))
+      if ((q->link & ~31U) == (uint32_t)&p->qh) { q->link = p->qh.link; break; }
+    if (on)
+      periodic_schedule(h, 1);
   } else {
     p->ed.flags |= 1U << 14;
     if (h->live)
       usb_delay_ms(2);
-  }
-  p->pending = 0;
-  if (h->kind == 0x20 && h->live)
-    for (unsigned int n = h->first; n < h->first + h->ports; n++)
-      if (ports[n].pending) {
-        periodic_schedule(h, 1);
-        break;
-      }
-}
-int usb_legacy_mouse(int index, unsigned int address, unsigned int endpoint,
-                     unsigned int packet, unsigned char *toggle, void *data) {
-  Port *p = &ports[index];
-  Host *h = &hosts[p->host];
-  if (!h->live || !packet || packet > sizeof(p->dma))
-    return -1;
-  int result = -2;
-  if (p->pending) {
-    if (h->kind == 0x20) {
-      unsigned int token = p->qtd.token;
-      if (token & 128)
-        return -2;
-      if (periodic_schedule(h, 0))
-        return -1;
-      if (token & 0x7c)
-        return -1;
-      unsigned int residue = (token >> 16) & 0x7fff;
-      if (residue > packet)
-        return -1;
-      result = packet - residue;
-      *toggle = token >> 31;
-    } else {
-      if ((p->td[0].flags >> 28) == 15)
-        return -2;
-      p->ed.flags |= 1U << 14;
+    for (Ed *e = &h->anchor_ed; e->next; e = (Ed *)e->next)
+      if (e->next == (uint32_t)&p->ed) { e->next = p->ed.next; break; }
+    if (h->live)
       usb_delay_ms(2);
-      if (p->td[0].flags >> 28)
-        return -1;
-      result = p->td[0].buffer ? p->td[0].buffer - (uint32_t)p->dma : packet;
-      if ((unsigned int)result > packet)
-        return -1;
-      *toggle = (p->ed.head >> 1) & 1;
-    }
-    if (result > 0)
-      memcpy(data, p->dma, result);
   }
+  p->used = 0;
+}
+unsigned int usb_legacy_pipe_status(int pipe) {
+  return pipe >= 0 && pipe < PIPES ? pipes[pipe].status : 0;
+}
+/* (Re)starts a pipe from nothing: the slow path, at the start and after an
+ * error halted the endpoint. */
+static int pipe_start(Pipe *p, Host *h, unsigned int address, unsigned int endpoint,
+                      unsigned int packet, unsigned int toggle, unsigned int route, int index) {
   if (h->kind == 0x20) {
     if (periodic_schedule(h, 0))
       return -1;
-    fill_qtd(&p->qtd, 1, *toggle, p->dma, packet);
-    p->qh.ep =
-        address | (endpoint << 8) | (2U << 12) | (1U << 14) | (packet << 16);
-    p->qh.cap = 1 | (1U << 30);
+    fill_pipe_qtd(p, 0, toggle, packet);
+    p->qtd[1].token = 0;
+    p->qtd[1].next = (uint32_t)&p->qtd[0];
+    p->qtd[1].alt = 1;
+    ehci_route(&p->qh, address, endpoint, packet, route, 0, 1);
     p->qh.current = 0;
-    memset(&p->qh.overlay, 0, sizeof(Qtd));
-    p->qh.overlay.next = (uint32_t)&p->qtd;
+    memset((void *)&p->qh.overlay, 0, sizeof(Qtd));
+    p->qh.overlay.next = (uint32_t)&p->qtd[0];
     p->qh.overlay.alt = 1;
     barrier();
     if (periodic_schedule(h, 1))
       return -1;
   } else {
-    fill_ot(p->td, 2, *toggle, p->dma, packet);
-    p->ed.flags = address | (endpoint << 7) |
-                  ((usb_legacy_status(index) & 0x100) ? 1U << 13 : 0) |
-                  (packet << 16) | (1U << 14);
+    p->ed.flags |= 1U << 14;
+    usb_delay_ms(2);
+    fill_ot(p->td, 2, toggle, p->dma[0], packet);
+    p->ed.flags = address | (endpoint << 7) | ohci_low(index, route) | (packet << 16) | (1U << 14);
     p->ed.tail = (uint32_t)&p->td[1];
     p->ed.head = (uint32_t)&p->td[0];
     barrier();
     p->ed.flags &= ~(1U << 14);
   }
-  p->pending = 1;
+  p->current = 0;
+  p->started = 1;
+  return 0;
+}
+/* Polls a mouse pipe: bytes received (>= 0), -2 nothing yet, -3 a transfer
+ * error (usb_legacy_pipe_status tells which; the next call retries), -1 the
+ * controller is gone. */
+int usb_legacy_mouse(int pipe, unsigned int address, unsigned int endpoint,
+                     unsigned int packet, unsigned char *toggle, void *data,
+                     unsigned int route) {
+  if (pipe < 0 || pipe >= PIPES || !pipes[pipe].used)
+    return -1;
+  Pipe *p = &pipes[pipe];
+  Host *h = &hosts[ports[p->port].host];
+  if (!h->live || !packet)
+    return -1;
+  if (packet > PIPE_PACKET)
+    packet = PIPE_PACKET;
+  if (!p->started)
+    return pipe_start(p, h, address, endpoint, packet, *toggle, route, p->port) ? -1 : -2;
+  int k = p->current, result;
+  if (h->kind == 0x20) {
+    uint32_t token = p->qtd[k].token;
+    if (token & 128)
+      return -2;
+    /* Only a halt is an error: transaction errors and missed micro-frames
+     * that the controller retried successfully leave their bits set. */
+    if (token & 0x40) {
+      p->status = token & 0xff;
+      p->started = 0;
+      return -3;
+    }
+    unsigned int residue = (token >> 16) & 0x7fff;
+    if (residue > packet) {
+      p->status = 0x100 | (token & 0xff);
+      p->started = 0;
+      return -3;
+    }
+    result = packet - residue;
+    *toggle = token >> 31;
+    if (result)
+      memcpy(data, p->dma[k], result);
+    /* The controller now waits on the other qTD: arm it. */
+    fill_pipe_qtd(p, k ^ 1, *toggle, packet);
+  } else {
+    Ot *t = &p->td[k];
+    unsigned int code = t->flags >> 28;
+    if (code == 15)
+      return -2;
+    if (code) {
+      p->status = 0x200 | code;
+      p->started = 0;
+      return -3;
+    }
+    result = t->buffer ? t->buffer - (uint32_t)p->dma[k] : packet;
+    if ((unsigned int)result > packet) {
+      p->status = 0x300;
+      p->started = 0;
+      return -3;
+    }
+    *toggle = (p->ed.head >> 1) & 1;
+    if (result)
+      memcpy(data, p->dma[k], result);
+    /* The retired TD becomes the new dummy tail; the old dummy carries
+     * the next transfer. */
+    Ot *next = &p->td[k ^ 1];
+    t->flags = 0; t->buffer = t->end = 0; t->next = 0;
+    next->flags = 0xf0000000U | (7U << 21) | (2U << 19) | (1U << 18);   /* toggle from the ED */
+    next->buffer = (uint32_t)p->dma[k ^ 1];
+    next->end = (uint32_t)p->dma[k ^ 1] + packet - 1;
+    next->next = (uint32_t)t;
+    barrier();
+    p->ed.tail = (uint32_t)t;
+  }
+  p->current = k ^ 1;
   return result;
 }
 
