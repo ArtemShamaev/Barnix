@@ -59,6 +59,7 @@
     {"cannot read /etc/sys-lang.cfg; language unchanged", "Не удалось прочитать /etc/sys-lang.cfg; язык не изменён"},
     {"invalid /etc/sys-lang.cfg; expected LANG=en or LANG=ru", "Ошибка /etc/sys-lang.cfg: ожидается LANG=en или LANG=ru"},
     {"help        - show help", "help        - справка"},
+    {"-- more: any key, Q or Esc - quit --", "-- далее: любая клавиша, Q или Esc - выход --"},
     {"clear       - clear screen", "clear       - очистить экран"},
     {"ls          - list files", "ls          - список файлов"},
     {"cat <file>  - print file", "cat <file>  - показать файл"},

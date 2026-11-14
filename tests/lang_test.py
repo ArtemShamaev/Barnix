@@ -122,7 +122,18 @@ with tempfile.TemporaryDirectory(prefix='barnix-lang-') as temporary:
         prefix = 'x' * 68
         guest.type('echo ' + prefix + 'А'); guest.key('backspace'); guest.type('Б'); guest.key('ret')
         guest.expect('\n' + prefix + 'Б\n')
-        guest.command('help', 'brm -S ИМЯ - установить программу из репозитория')
+        # help pauses after the first screen; any key shows the next page.
+        guest.type('clear'); guest.key('ret'); time.sleep(.4)
+        guest.type('help'); guest.key('ret')
+        more = '-- далее: любая клавиша, Q или Esc - выход --'
+        screen = guest.expect(more)
+        seen = screen
+        while more in screen.rstrip().splitlines()[-1]:
+            guest.key('spc'); time.sleep(.4)
+            screen = guest.screen(); seen += screen
+        assert 'brm -S ИМЯ - установить программу из репозитория' in seen, seen
+        guest.expect('bssh>')
+        assert 'од --' not in guest.screen()   # the pager prompt is fully erased
         # Capture actual pixels as well as glyph codes, for manual font inspection.
         guest.command('echo АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ', '\nАБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ\n')
         guest.type('echo абвгдеёжзийклмнопрстуфхцчшщъыьэюя'); guest.key('ret')
