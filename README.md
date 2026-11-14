@@ -33,10 +33,12 @@ e2fsprogs, Python 3 с Pillow, шрифты Liberation и JDK (для Java-пр�
 ```sh
 # Arch Linux
 sudo pacman -S --needed base-devel lib32-glibc grub libisoburn mtools \
-    qemu-system-x86 e2fsprogs python python-pillow ttf-liberation jdk-openjdk zlib
+    qemu-system-x86 e2fsprogs python python-pillow python-cryptography \
+    ttf-liberation jdk-openjdk zlib curl
 # Debian / Ubuntu
 sudo apt install build-essential gcc-multilib grub-pc-bin grub-efi-amd64-bin \
     grub-common xorriso mtools qemu-system-x86 e2fsprogs python3 python3-pil \
+    python3-cryptography curl \
     fonts-liberation default-jdk-headless zlib1g-dev
 
 make barnix.iso   # собрать образ системы

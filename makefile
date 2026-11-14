@@ -8,7 +8,7 @@ INCLUDES = -I. $(addprefix -I,$(KERNEL_DIRS))
 
 # WERROR=-Werror turns warnings into errors (CI uses it).
 WERROR ?=
-CFLAGS = -O2 -m32 -march=i386 -mno-sse -mno-mmx -msoft-float -ffreestanding -nostdlib -fno-pie -fno-pic -fno-stack-protector -Wall $(WERROR) $(INCLUDES)
+CFLAGS = -O2 -m32 -march=i386 -mno-sse -mno-mmx -msoft-float -ffreestanding -nostdlib -fno-pie -fno-pic -fno-stack-protector -U_FORTIFY_SOURCE -Wall $(WERROR) $(INCLUDES)
 LDFLAGS = -m elf_i386 -T kernel/linker.ld
 
 OBJS = $(addprefix build/,$(addsuffix .o,\
@@ -81,7 +81,7 @@ rebuild:
 	$(MAKE) clean
 	$(MAKE) all
 
-APP_CFLAGS = -m32 -march=i386 -mno-sse -mno-mmx -msoft-float -O2 -ffreestanding -fno-pie -fno-pic -fno-stack-protector -Wall -Wextra $(INCLUDES) -Iapps -Ibarnixiolib
+APP_CFLAGS = -m32 -march=i386 -mno-sse -mno-mmx -msoft-float -O2 -ffreestanding -fno-pie -fno-pic -fno-stack-protector -U_FORTIFY_SOURCE -Wall -Wextra $(INCLUDES) -Iapps -Ibarnixiolib
 LINUX_COMMANDS = echo pwd cat ls touch write append cp true false
 COMMANDS = beep play df diskinfo devices clear rm mkdir cd rmdir stat mv panic sync mount format unmount help init macro bnm get git brm chmod su sudo whoami useradd theme snake pong fdisk paint execute bcc barnocraft gouse gldemo glrunner java nova
 APPS = apps/hello.elf apps/fileio.elf apps/theme.elf apps/snake.elf apps/asciiart.elf apps/excuse.elf apps/fortune.elf apps/pong.elf $(addprefix apps/bin/,$(sort $(COMMANDS) $(LINUX_COMMANDS)))
@@ -210,7 +210,7 @@ GOUSE_WEB_OBJECTS = $(patsubst apps/gouse/%.c,apps/gouse/obj/%.o,$(GOUSE_WEB_SOU
 GOUSE_SOURCES = $(filter-out apps/gouse/js_platform.c $(GOUSE_WEB_SOURCES),$(wildcard apps/gouse/*.c))
 # QuickJS is built with x87 and a pinned, freestanding musl support archive.
 WEB_LIBC = apps/gouse/obj/musl/lib/libc.a
-WEB_JS_FLAGS = -m32 -march=i386 -mno-sse -mno-mmx -mfpmath=387 -Os -ffreestanding -fno-pie -fno-pic -fno-stack-protector -ffunction-sections -fdata-sections -D_GNU_SOURCE -DBARNIX_JS -DCONFIG_VERSION='"2025-09-13"' -nostdinc -isystem apps/gouse/obj/musl/obj/include -isystem apps/gouse/obj/musl/include -isystem apps/gouse/obj/musl/arch/i386 -isystem apps/gouse/obj/musl/arch/generic -isystem $(shell $(CC) -print-file-name=include)
+WEB_JS_FLAGS = -m32 -march=i386 -mno-sse -mno-mmx -mfpmath=387 -Os -ffreestanding -fno-pie -fno-pic -fno-stack-protector -U_FORTIFY_SOURCE -ffunction-sections -fdata-sections -D_GNU_SOURCE -DBARNIX_JS -DCONFIG_VERSION='"2025-09-13"' -nostdinc -isystem apps/gouse/obj/musl/obj/include -isystem apps/gouse/obj/musl/include -isystem apps/gouse/obj/musl/arch/i386 -isystem apps/gouse/obj/musl/arch/generic -isystem $(shell $(CC) -print-file-name=include)
 WEB_JS_NAMES = quickjs dtoa libregexp libunicode cutils
 WEB_JS_HOST_OBJECTS = $(addprefix apps/gouse/obj/host_,$(addsuffix .o,$(WEB_JS_NAMES)))
 apps/gouse/obj/host_%.o: apps/gouse/vendor/quickjs/%.c
@@ -245,7 +245,7 @@ apps/bin/%.elf: apps/%.elf makefile
 	mkdir -p apps/bin
 	cp $< $@
 
-USER_CFLAGS = -m32 -march=i386 -mno-sse -mno-mmx -msoft-float -O2 -ffreestanding -fno-pie -fno-pic -fno-stack-protector -Wall -Wextra
+USER_CFLAGS = -m32 -march=i386 -mno-sse -mno-mmx -msoft-float -O2 -ffreestanding -fno-pie -fno-pic -fno-stack-protector -U_FORTIFY_SOURCE -Wall -Wextra
 
 $(addprefix apps/bin/,$(LINUX_COMMANDS)): apps/bin/%: userland/commands.c userland/start.S userland/syscall.h include/uapi/unistd.h makefile
 	mkdir -p apps/bin

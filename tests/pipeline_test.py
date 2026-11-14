@@ -11,8 +11,9 @@ programs = {name: pathlib.Path(f'apps/bin/{name}').resolve()
 large = bytes(range(256)) * 512 + b'last byte\x00\xff'
 
 
+# bssh follows bash semantics; /bin/sh is dash on Debian/Ubuntu (other exit codes).
 def native(command, directory, reference=False):
-    invocation = ['/bin/sh', '-c', command] if reference else [str(runner), command]
+    invocation = ['bash', '-c', command] if reference else [str(runner), command]
     return subprocess.run(invocation, cwd=directory, env={}, capture_output=True, timeout=30)
 
 
