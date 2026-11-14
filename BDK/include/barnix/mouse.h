@@ -1,4 +1,4 @@
 #ifndef BDK_BARNIX_MOUSE_H
 #define BDK_BARNIX_MOUSE_H
-#include "../../../mouse.h"
+#include "../../../include/abi/mouse.h"
 #endif

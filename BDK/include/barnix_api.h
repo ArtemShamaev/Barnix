@@ -2,8 +2,8 @@
 #define BARNINO_BDK_API_H
 #include <stddef.h>
 #ifdef BARNIX_IN_TREE
-#include "../../app_abi.h"
-#include "../../keyboard.h"
+#include "../../include/abi/app_abi.h"
+#include "../../include/abi/keyboard.h"
 #else
 #include <barnix/app_abi.h>
 #include <barnix/keyboard.h>

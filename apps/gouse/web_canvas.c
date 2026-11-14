@@ -50,7 +50,8 @@ static void fill(WCanvasState *c,unsigned int color,int clear) {
     if(c->count<3)return;
     int low=c->image.height,high=0;
     for(int i=0;i<c->count;i++){int y=(int)floor(c->points[i].y);if(y<low)low=y;if(y+1>high)high=y+1;}
-    if(low<0)low=0;if(high>c->image.height)high=c->image.height;
+    if(low<0)low=0;
+    if(high>c->image.height)high=c->image.height;
     double xs[POINTS];
     for(int y=low;y<high && c->owner->draw_budget;y++) {
         int count=0,start=0;
@@ -65,7 +66,8 @@ static void fill(WCanvasState *c,unsigned int color,int clear) {
         }
         for(int i=0;i+1<count;i+=2) {
             int a=(int)ceil(xs[i]-0.5),b=(int)ceil(xs[i+1]-0.5);
-            if(a<0)a=0;if(b>c->image.width)b=c->image.width;
+            if(a<0)a=0;
+            if(b>c->image.width)b=c->image.width;
             for(int x=a;x<b;x++)pixel(c,x,y,color,clear);
         }
     }
@@ -77,7 +79,8 @@ static void line(WCanvasState *c,Point a,Point b) {
     for(int k=0;k<4;k++){if(p[k]==0){if(q[k]<0)return;}else {double t=q[k]/p[k];if(p[k]<0){if(t>t1)return;if(t>t0)t0=t;}else{if(t<t0)return;if(t<t1)t1=t;}}}
     b.x=a.x+dx*t1;b.y=a.y+dy*t1;a.x+=dx*t0;a.y+=dy*t0;
     dx=b.x-a.x;dy=b.y-a.y;int steps=(int)ceil(fmax(fabs(dx),fabs(dy)));
-    if(steps<1)steps=1;int r=(int)(c->pen.width/2);if(r>32)r=32;
+    if(steps<1)steps=1;
+    int r=(int)(c->pen.width/2);if(r>32)r=32;
     for(int i=0;i<=steps && c->owner->draw_budget;i++) {int x=(int)floor(a.x+dx*i/steps),y=(int)floor(a.y+dy*i/steps);
         for(int v=-r;v<=r;v++)for(int u=-r;u<=r;u++)if(u*u+v*v<=r*r)pixel(c,x+u,y+v,c->pen.stroke,0);
     }
@@ -102,12 +105,14 @@ JSValue web_canvas_call(WJs *j,WNode *n,const char *op,int argc,JSValueConst *ar
     double a[6]={0};
     if(!w_eq(op,"get")&&!w_eq(op,"set")&&!w_eq(op,"setLineDash"))for(int i=0;i<argc&&i<6;i++) {
         if(JS_ToFloat64(ctx,&a[i],argv[i]))return JS_EXCEPTION;
-        if(!isfinite(a[i]))return JS_UNDEFINED;a[i]=bounded(a[i]);
+        if(!isfinite(a[i]))return JS_UNDEFINED;
+        a[i]=bounded(a[i]);
     }
     if(w_eq(op,"init"))return JS_UNDEFINED;
     if(w_eq(op,"resize")){if(resize(c))return JS_ThrowRangeError(ctx,"Canvas is too large");}
     else if(w_eq(op,"get")||w_eq(op,"set")) {
-        if(argc<1)return JS_UNDEFINED;const char *key=JS_ToCString(ctx,argv[0]);if(!key)return JS_EXCEPTION;
+        if(argc<1)return JS_UNDEFINED;
+        const char *key=JS_ToCString(ctx,argv[0]);if(!key)return JS_EXCEPTION;
         JSValue r=JS_UNDEFINED;
         if(w_eq(op,"get")) {
             if(w_eq(key,"globalAlpha"))r=JS_NewFloat64(ctx,c->pen.alpha);

@@ -1,7 +1,7 @@
 #ifndef BARNIX_GAME_H
 #define BARNIX_GAME_H
 #include "command.h"
-#include "../keyboard.h"
+#include "../include/abi/keyboard.h"
 static void cell(int x,int y,char ch,int color) {
     char text[2]={ch,0};barnix->goto_xy(x,y);barnix->print(color,text);
 }

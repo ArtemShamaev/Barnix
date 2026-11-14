@@ -42,13 +42,18 @@ int mouse_source(unsigned int source,int connected,int dx,int dy,unsigned int bu
     unsigned int all_buttons=0;int available=0;
     for(int i=0;i<96;i++){all_buttons|=source_buttons[i];available|=source_present[i];}
     /* Bound untrusted HID deltas before adding to the logical cursor. */
-    if(dx>640)dx=640;if(dx< -640)dx= -640;
-    if(dy>400)dy=400;if(dy< -400)dy= -400;
+    if(dx>640)dx=640;
+    if(dx< -640)dx= -640;
+    if(dy>400)dy=400;
+    if(dy< -400)dy= -400;
     /* Games need movement past the screen edge: keep unclamped deltas. */
     if(motion_x+dx>-(1<<24)&&motion_x+dx<(1<<24))motion_x+=dx;
     if(motion_y+dy>-(1<<24)&&motion_y+dy<(1<<24))motion_y+=dy;
     int x=ps2_mouse_state.x+dx,y=ps2_mouse_state.y+dy;
-    if(x<0)x=0;if(x>639)x=639;if(y<0)y=0;if(y>399)y=399;
+    if(x<0)x=0;
+    if(x>639)x=639;
+    if(y<0)y=0;
+    if(y>399)y=399;
     int changed=x!=ps2_mouse_state.x||y!=ps2_mouse_state.y||all_buttons!=ps2_mouse_state.buttons||available!=ps2_mouse_state.available||wheel||horizontal;
     wheel_total=(int)((unsigned int)wheel_total+(unsigned int)wheel);
     horizontal_total=(int)((unsigned int)horizontal_total+(unsigned int)horizontal);

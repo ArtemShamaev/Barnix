@@ -21,13 +21,14 @@ def sdk(destination):
                     ignore=shutil.ignore_patterns('__pycache__', 'bin', 'obj'))
     headers = destination / 'include' / 'barnix'
     headers.mkdir(parents=True, exist_ok=True)
-    for name in ('app_abi.h', 'mouse.h', 'keyboard.h', 'audio.h', 'netinfo.h'):
-        shutil.copy2(REPO / name, headers / name)
-    for name in ('text.c', 'text.h'):
-        shutil.copy2(REPO / name, destination / 'runtime' / name)
+    for path in ('include/abi/app_abi.h', 'include/abi/mouse.h', 'include/abi/keyboard.h',
+                 'include/abi/audio.h', 'include/abi/netinfo.h'):
+        shutil.copy2(REPO / path, headers / Path(path).name)
+    for path in ('kernel/text.c', 'kernel/text.h'):
+        shutil.copy2(REPO / path, destination / 'runtime' / Path(path).name)
     shutil.copy2(REPO / 'apps/runtime.c', destination / 'runtime/memory.c')
     shutil.copy2(REPO / 'barnixiolib/stdio.c', destination / 'runtime/stdio.c')
-    stdio = (REPO / 'barnixiolib/stdio.h').read_text().replace('../app_abi.h', 'barnix/app_abi.h')
+    stdio = (REPO / 'barnixiolib/stdio.h').read_text().replace('../include/abi/app_abi.h', 'barnix/app_abi.h')
     # The existing C library is usable from both languages without name mangling.
     stdio = stdio.replace('/* A deliberately', '#ifdef __cplusplus\nextern "C" {\n#endif\n\n/* A deliberately')
     pos = stdio.rfind('#endif')

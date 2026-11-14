@@ -1,7 +1,7 @@
 /* Happy Gouse helpers: strings, formatting, time, files, drawing and widgets. */
 #include "gouse.h"
 #include <barnix_net.h>
-#include "../../text.h"
+#include "../../kernel/text.h"
 
 /* ---------------------------------------------------------------- strings */
 int g_len(const char *s) { int n = 0; while (s && s[n]) n++; return n; }

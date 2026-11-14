@@ -1,1 +1,1 @@
-#include "../../text.c"
+#include "../../kernel/text.c"

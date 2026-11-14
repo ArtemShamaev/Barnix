@@ -90,7 +90,7 @@ def build(project, native_sources=None):
             # In a source checkout the public SDK header is a thin wrapper;
             # packaged SDKs contain the expanded header directly.
             version_match = re.search(r'#define BARNIX_APP_ABI (\d+)U',
-                                      (sdk.parent / 'app_abi.h').read_text())
+                                      (sdk.parent / 'include' / 'abi' / 'app_abi.h').read_text())
         version = int(version_match[1])
         data[7:9] = bytes([255, version])
         # Use the destination filesystem for an atomic replacement.

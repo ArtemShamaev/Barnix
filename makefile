@@ -2,57 +2,64 @@ CC = gcc
 LD = ld
 OBJCOPY = objcopy
 
-CFLAGS = -O2 -m32 -march=i386 -mno-sse -mno-mmx -msoft-float -ffreestanding -nostdlib -fno-pie -fno-pic -fno-stack-protector -Wall -I.
-LDFLAGS = -m elf_i386 -T linker.ld
+# Source directories: kernel core, filesystem, Linux ABI, shell and drivers.
+KERNEL_DIRS = include/abi kernel kernel/fs kernel/linux kernel/shell drivers/input drivers/net drivers/sound drivers/storage drivers/usb drivers/video
+INCLUDES = -I. $(addprefix -I,$(KERNEL_DIRS))
 
-OBJS = \
-	boot.o \
-	kernel.o \
-	barnix.o \
-	fs.o \
-	elf.o \
-	elf_format.o \
-	elf_enter.o \
-	disk.o \
-	storage_pci.o \
-	wifi_iwl.o \
-	net.o \
-	net_e1000.o \
-	net_pcnet.o \
-	net_realtek.o \
-	net_tcp.o \
-	net_vwifi.o \
-	wifi.o \
-	wifi_crypto.o \
-	linux_task.o \
-	linux_memory.o \
-	linux_exec.o \
-	linux_syscall.o \
-	linux_idt.o \
-	linux_int80.o \
-	linux_tss.o \
-	linux_user.o \
-	usb_storage.o \
-	usb_hid.o \
-	usb_xhci.o \
-	usb_legacy.o \
-	bssh.o \
-	bssh_runner.o \
-	shell_parse.o \
-	keyboard.o \
-	timer.o \
-	mouse.o \
-	text.o \
-	font.o \
-	console_video.o \
-	video_rgb.o \
-	memory.o \
-	smp.o \
-	smp_entry.o \
-	audio.o \
-	system_sound.o \
-	settings.o \
-	lang.o
+# WERROR=-Werror turns warnings into errors (CI uses it).
+WERROR ?=
+CFLAGS = -O2 -m32 -march=i386 -mno-sse -mno-mmx -msoft-float -ffreestanding -nostdlib -fno-pie -fno-pic -fno-stack-protector -Wall $(WERROR) $(INCLUDES)
+LDFLAGS = -m elf_i386 -T kernel/linker.ld
+
+OBJS = $(addprefix build/,$(addsuffix .o,\
+	boot \
+	kernel \
+	barnix \
+	fs \
+	elf \
+	elf_format \
+	elf_enter \
+	disk \
+	storage_pci \
+	wifi_iwl \
+	net \
+	net_e1000 \
+	net_pcnet \
+	net_realtek \
+	net_tcp \
+	net_vwifi \
+	wifi \
+	wifi_crypto \
+	linux_task \
+	linux_memory \
+	linux_exec \
+	linux_syscall \
+	linux_idt \
+	linux_int80 \
+	linux_tss \
+	linux_user \
+	usb_storage \
+	usb_hid \
+	usb_xhci \
+	usb_legacy \
+	bssh \
+	bssh_runner \
+	shell_parse \
+	keyboard \
+	timer \
+	mouse \
+	text \
+	font \
+	console_video \
+	video_rgb \
+	memory \
+	smp \
+	smp_entry \
+	audio \
+	system_sound \
+	settings \
+	lang \
+	))
 
 DEPS = $(OBJS:.o=.d)
 CFLAGS += -MMD -MP
@@ -74,31 +81,31 @@ rebuild:
 	$(MAKE) clean
 	$(MAKE) all
 
-APP_CFLAGS = -m32 -march=i386 -mno-sse -mno-mmx -msoft-float -O2 -ffreestanding -fno-pie -fno-pic -fno-stack-protector -Wall -Wextra -I. -Iapps -Ibarnixiolib
+APP_CFLAGS = -m32 -march=i386 -mno-sse -mno-mmx -msoft-float -O2 -ffreestanding -fno-pie -fno-pic -fno-stack-protector -Wall -Wextra $(INCLUDES) -Iapps -Ibarnixiolib
 LINUX_COMMANDS = echo pwd cat ls touch write append cp true false
 COMMANDS = beep play df diskinfo devices clear rm mkdir cd rmdir stat mv panic sync mount format unmount help init macro bnm get git brm chmod su sudo whoami useradd theme snake pong fdisk paint execute bcc barnocraft gouse gldemo glrunner java nova
 APPS = apps/hello.elf apps/fileio.elf apps/theme.elf apps/snake.elf apps/asciiart.elf apps/excuse.elf apps/fortune.elf apps/pong.elf $(addprefix apps/bin/,$(sort $(COMMANDS) $(LINUX_COMMANDS)))
 
 apps: $(APPS)
 
-apps/%.elf: apps/%.c apps/start.c apps/runtime.c text.c barnixiolib/stdio.c barnixiolib/stdio.h apps/barnix_app.h app_abi.h apps/app.ld scripts/mark_barnix_elf.py makefile
-	$(CC) $(APP_CFLAGS) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-T,apps/app.ld apps/start.c apps/runtime.c text.c barnixiolib/stdio.c $< -o $@
+apps/%.elf: apps/%.c apps/start.c apps/runtime.c kernel/text.c barnixiolib/stdio.c barnixiolib/stdio.h apps/barnix_app.h include/abi/app_abi.h apps/app.ld scripts/mark_barnix_elf.py makefile
+	$(CC) $(APP_CFLAGS) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-T,apps/app.ld apps/start.c apps/runtime.c kernel/text.c barnixiolib/stdio.c $< -o $@
 	python3 scripts/mark_barnix_elf.py $@
 
-apps/bin/%: apps/%.c apps/command.h apps/start.c apps/runtime.c text.c barnixiolib/stdio.c barnixiolib/stdio.h apps/barnix_app.h app_abi.h apps/app.ld scripts/mark_barnix_elf.py makefile
+apps/bin/%: apps/%.c apps/command.h apps/start.c apps/runtime.c kernel/text.c barnixiolib/stdio.c barnixiolib/stdio.h apps/barnix_app.h include/abi/app_abi.h apps/app.ld scripts/mark_barnix_elf.py makefile
 	mkdir -p apps/bin
-	$(CC) $(APP_CFLAGS) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-T,apps/app.ld apps/start.c apps/runtime.c text.c barnixiolib/stdio.c $< -o $@
+	$(CC) $(APP_CFLAGS) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-T,apps/app.ld apps/start.c apps/runtime.c kernel/text.c barnixiolib/stdio.c $< -o $@
 	python3 scripts/mark_barnix_elf.py $@
 
 # Execute shares the SDK graphics implementation, without a packaged SDK dependency.
-apps/bin/execute: apps/execute.c apps/start.c apps/runtime.c text.c BDK/runtime/graphics.c BDK/include/barnix_graphics.h BDK/include/barnix_api.h apps/barnix_app.h app_abi.h apps/app.ld makefile
+apps/bin/execute: apps/execute.c apps/start.c apps/runtime.c kernel/text.c BDK/runtime/graphics.c BDK/include/barnix_graphics.h BDK/include/barnix_api.h apps/barnix_app.h include/abi/app_abi.h apps/app.ld makefile
 	mkdir -p apps/bin
-	$(CC) $(APP_CFLAGS) -DBARNIX_IN_TREE -IBDK/include -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-T,apps/app.ld apps/start.c apps/runtime.c text.c BDK/runtime/graphics.c apps/execute.c -o $@
+	$(CC) $(APP_CFLAGS) -DBARNIX_IN_TREE -IBDK/include -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-T,apps/app.ld apps/start.c apps/runtime.c kernel/text.c BDK/runtime/graphics.c apps/execute.c -o $@
 	python3 scripts/mark_barnix_elf.py $@
 
-apps/bin/bcc: apps/bcc.c apps/bcc_template.inc apps/start.c apps/runtime.c text.c barnixiolib/stdio.c barnixiolib/stdio.h apps/barnix_app.h app_abi.h apps/app.ld makefile
+apps/bin/bcc: apps/bcc.c apps/bcc_template.inc apps/start.c apps/runtime.c kernel/text.c barnixiolib/stdio.c barnixiolib/stdio.h apps/barnix_app.h include/abi/app_abi.h apps/app.ld makefile
 	mkdir -p apps/bin
-	$(CC) $(APP_CFLAGS) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-T,apps/app.ld apps/start.c apps/runtime.c text.c barnixiolib/stdio.c apps/bcc.c -o $@
+	$(CC) $(APP_CFLAGS) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-T,apps/app.ld apps/start.c apps/runtime.c kernel/text.c barnixiolib/stdio.c apps/bcc.c -o $@
 	python3 scripts/mark_barnix_elf.py $@
 
 # Barnocraft: mipmapped textures and the sine table are generated from the PNG;
@@ -114,35 +121,35 @@ apps/gouse/gouse_sounds.h: $(wildcard sounds/g_*.wav) scripts/sound_assets.py
 	python3 scripts/sound_assets.py $@ gs $(call sound_args,g)
 apps/arcade_sounds.h: $(wildcard sounds/arc_*.wav) scripts/sound_assets.py
 	python3 scripts/sound_assets.py $@ arc $(call sound_args,arc)
-system_sounds.h: $(wildcard sounds/sys_*.wav) scripts/sound_assets.py
+drivers/sound/system_sounds.h: $(wildcard sounds/sys_*.wav) scripts/sound_assets.py
 	python3 scripts/sound_assets.py $@ sys $(call sound_args,sys)
 BARNOCRAFT_CORE = apps/barnocraft_game.c apps/barnocraft_game.h apps/barnocraft_assets.h apps/barnocraft_sounds.h
 # The raycaster runs per pixel: i686 (cmov, Pentium Pro and later) and -O3.
-apps/barnocraft_game.o: $(BARNOCRAFT_CORE) BDK/include/barnix_gfx.h BDK/include/barnix_sound.h app_abi.h audio.h makefile
+apps/barnocraft_game.o: $(BARNOCRAFT_CORE) BDK/include/barnix_gfx.h BDK/include/barnix_sound.h include/abi/app_abi.h include/abi/audio.h makefile
 	$(CC) $(APP_CFLAGS) -O3 -march=i686 -DBARNIX_IN_TREE -IBDK/include -c apps/barnocraft_game.c -o $@
-APP_GFX_DEPS = apps/command.h apps/start.c apps/runtime.c text.c BDK/runtime/gfx.c BDK/runtime/sound.c BDK/include/barnix_gfx.h BDK/include/barnix_sound.h audio.h BDK/include/barnix_api.h apps/barnix_app.h app_abi.h keyboard.h mouse.h apps/app.ld scripts/mark_barnix_elf.py makefile
+APP_GFX_DEPS = apps/command.h apps/start.c apps/runtime.c kernel/text.c BDK/runtime/gfx.c BDK/runtime/sound.c BDK/include/barnix_gfx.h BDK/include/barnix_sound.h include/abi/audio.h BDK/include/barnix_api.h apps/barnix_app.h include/abi/app_abi.h include/abi/keyboard.h include/abi/mouse.h apps/app.ld scripts/mark_barnix_elf.py makefile
 # Sound commands use the BDK Barnix Sound library.
-APP_SOUND_DEPS = apps/command.h apps/start.c apps/runtime.c text.c BDK/runtime/sound.c BDK/include/barnix_sound.h BDK/include/barnix_api.h apps/barnix_app.h app_abi.h audio.h apps/app.ld scripts/mark_barnix_elf.py makefile
+APP_SOUND_DEPS = apps/command.h apps/start.c apps/runtime.c kernel/text.c BDK/runtime/sound.c BDK/include/barnix_sound.h BDK/include/barnix_api.h apps/barnix_app.h include/abi/app_abi.h include/abi/audio.h apps/app.ld scripts/mark_barnix_elf.py makefile
 apps/bin/beep apps/bin/play: apps/bin/%: apps/%.c $(APP_SOUND_DEPS)
 	mkdir -p apps/bin
-	$(CC) $(APP_CFLAGS) -DBARNIX_IN_TREE -IBDK/include -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-T,apps/app.ld apps/start.c apps/runtime.c text.c BDK/runtime/sound.c $< -o $@
+	$(CC) $(APP_CFLAGS) -DBARNIX_IN_TREE -IBDK/include -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-T,apps/app.ld apps/start.c apps/runtime.c kernel/text.c BDK/runtime/sound.c $< -o $@
 	python3 scripts/mark_barnix_elf.py $@
 
 # Network commands use the BDK Barnix Net library (HTTP, TLS, inflate).
 BNET_RUNTIME = BDK/runtime/net.c BDK/runtime/http.c BDK/runtime/tls.c BDK/runtime/x509.c BDK/runtime/pk.c BDK/runtime/crypto.c BDK/runtime/inflate.c
-BNET_DEPS = $(BNET_RUNTIME) BDK/runtime/bnet.h BDK/runtime/tls.h BDK/include/barnix_net.h netinfo.h apps/command.h apps/start.c apps/runtime.c text.c apps/barnix_app.h app_abi.h apps/app.ld scripts/mark_barnix_elf.py makefile
+BNET_DEPS = $(BNET_RUNTIME) BDK/runtime/bnet.h BDK/runtime/tls.h BDK/include/barnix_net.h include/abi/netinfo.h apps/command.h apps/start.c apps/runtime.c kernel/text.c apps/barnix_app.h include/abi/app_abi.h apps/app.ld scripts/mark_barnix_elf.py makefile
 apps/bin/get apps/bin/git apps/bin/brm: apps/bin/%: apps/%.c $(BNET_DEPS)
 	mkdir -p apps/bin
-	$(CC) $(APP_CFLAGS) -DBARNIX_IN_TREE -IBDK/include -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-T,apps/app.ld apps/start.c apps/runtime.c text.c $(BNET_RUNTIME) $< -o $@
+	$(CC) $(APP_CFLAGS) -DBARNIX_IN_TREE -IBDK/include -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-T,apps/app.ld apps/start.c apps/runtime.c kernel/text.c $(BNET_RUNTIME) $< -o $@
 	python3 scripts/mark_barnix_elf.py $@
 
 # Snake and Pong play arcade sounds.
 apps/snake.elf apps/pong.elf: apps/%.elf: apps/%.c apps/game.h apps/arcade_sounds.h $(APP_SOUND_DEPS)
-	$(CC) $(APP_CFLAGS) -DBARNIX_IN_TREE -IBDK/include -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-T,apps/app.ld apps/start.c apps/runtime.c text.c BDK/runtime/sound.c $< -o $@
+	$(CC) $(APP_CFLAGS) -DBARNIX_IN_TREE -IBDK/include -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-T,apps/app.ld apps/start.c apps/runtime.c kernel/text.c BDK/runtime/sound.c $< -o $@
 	python3 scripts/mark_barnix_elf.py $@
 apps/bin/snake apps/bin/pong: apps/bin/%: apps/%.c apps/game.h apps/arcade_sounds.h $(APP_SOUND_DEPS)
 	mkdir -p apps/bin
-	$(CC) $(APP_CFLAGS) -DBARNIX_IN_TREE -IBDK/include -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-T,apps/app.ld apps/start.c apps/runtime.c text.c BDK/runtime/sound.c $< -o $@
+	$(CC) $(APP_CFLAGS) -DBARNIX_IN_TREE -IBDK/include -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-T,apps/app.ld apps/start.c apps/runtime.c kernel/text.c BDK/runtime/sound.c $< -o $@
 	python3 scripts/mark_barnix_elf.py $@
 
 # Barnix OpenGL: the BDK software OpenGL 1.1 on the x87 FPU (-mhard-float
@@ -151,12 +158,12 @@ BXGL_RUNTIME = BDK/runtime/gl.c BDK/runtime/gl_raster.c BDK/runtime/glu.c BDK/ru
 BXGL_DEPS = $(BXGL_RUNTIME) BDK/runtime/gl_internal.h BDK/include/GL/gl.h BDK/include/GL/glu.h BDK/include/barnix_opengl.h BDK/include/math.h
 apps/bin/gldemo: apps/gldemo.c $(BXGL_DEPS) $(APP_GFX_DEPS)
 	mkdir -p apps/bin
-	$(CC) $(APP_CFLAGS) -mhard-float -march=i686 -DBARNIX_IN_TREE -IBDK/include -IBDK/runtime -nostdlib -static -no-pie -Wl,--build-id=none -Wl,--gc-sections -Wl,-T,apps/app.ld -ffunction-sections -fdata-sections apps/start.c apps/runtime.c text.c BDK/runtime/gfx.c $(BXGL_RUNTIME) $< -o $@
+	$(CC) $(APP_CFLAGS) -mhard-float -march=i686 -DBARNIX_IN_TREE -IBDK/include -IBDK/runtime -nostdlib -static -no-pie -Wl,--build-id=none -Wl,--gc-sections -Wl,-T,apps/app.ld -ffunction-sections -fdata-sections apps/start.c apps/runtime.c kernel/text.c BDK/runtime/gfx.c $(BXGL_RUNTIME) $< -o $@
 	python3 scripts/mark_barnix_elf.py $@
 
 apps/bin/glrunner: apps/glrunner.c $(BXGL_DEPS) $(APP_GFX_DEPS)
 	mkdir -p apps/bin
-	$(CC) $(APP_CFLAGS) -mhard-float -march=i686 -DBARNIX_IN_TREE -IBDK/include -IBDK/runtime -nostdlib -static -no-pie -Wl,--build-id=none -Wl,--gc-sections -Wl,-T,apps/app.ld -ffunction-sections -fdata-sections apps/start.c apps/runtime.c text.c BDK/runtime/gfx.c BDK/runtime/sound.c $(BXGL_RUNTIME) $< -o $@
+	$(CC) $(APP_CFLAGS) -mhard-float -march=i686 -DBARNIX_IN_TREE -IBDK/include -IBDK/runtime -nostdlib -static -no-pie -Wl,--build-id=none -Wl,--gc-sections -Wl,-T,apps/app.ld -ffunction-sections -fdata-sections apps/start.c apps/runtime.c kernel/text.c BDK/runtime/gfx.c BDK/runtime/sound.c $(BXGL_RUNTIME) $< -o $@
 	python3 scripts/mark_barnix_elf.py $@
 
 # BJVM: a Java 8 virtual machine with LWJGL 2 on Barnix OpenGL. The class
@@ -172,7 +179,7 @@ $(JAVA_DIR)/natives_gl.c: $(JAVA_DIR)/tools/gen_gl.py $(JAVA_DIR)/tools/gl_ext.p
 	python3 $(JAVA_DIR)/tools/gen_gl.py
 apps/bin/java: $(JAVA_SOURCES) $(JAVA_DIR)/jvm.h $(JAVA_DIR)/lwjgl_gl.h $(JAVA_DIR)/rt.S $(JAVA_DIR)/obj/rt.jar BDK/runtime/inflate.c $(BXGL_DEPS) $(APP_GFX_DEPS)
 	mkdir -p apps/bin
-	$(CC) $(APP_CFLAGS) -mhard-float -march=i686 -DBARNIX_IN_TREE -IBDK/include -IBDK/runtime -I$(JAVA_DIR) -DRT_JAR='"$(JAVA_DIR)/obj/rt.jar"' -Wno-unused-parameter -Wno-override-init -nostdlib -static -no-pie -Wl,--build-id=none -Wl,--gc-sections -Wl,-T,apps/app.ld -ffunction-sections -fdata-sections apps/start.c apps/runtime.c text.c BDK/runtime/gfx.c BDK/runtime/inflate.c $(BXGL_RUNTIME) $(JAVA_SOURCES) $(JAVA_DIR)/rt.S -lgcc -o $@
+	$(CC) $(APP_CFLAGS) -mhard-float -march=i686 -DBARNIX_IN_TREE -IBDK/include -IBDK/runtime -I$(JAVA_DIR) -DRT_JAR='"$(JAVA_DIR)/obj/rt.jar"' -Wno-unused-parameter -Wno-override-init -nostdlib -static -no-pie -Wl,--build-id=none -Wl,--gc-sections -Wl,-T,apps/app.ld -ffunction-sections -fdata-sections apps/start.c apps/runtime.c kernel/text.c BDK/runtime/gfx.c BDK/runtime/inflate.c $(BXGL_RUNTIME) $(JAVA_SOURCES) $(JAVA_DIR)/rt.S -lgcc -o $@
 	python3 scripts/mark_barnix_elf.py $@
 
 # Nova is a host-side compiler. Its Java 8 output runs on BJVM in Barnix.
@@ -192,7 +199,7 @@ nova-image: live-ext2.img nova
 
 apps/bin/barnocraft: apps/barnocraft.c apps/barnocraft_game.o $(BARNOCRAFT_CORE) $(APP_GFX_DEPS)
 	mkdir -p apps/bin
-	$(CC) $(APP_CFLAGS) -DBARNIX_IN_TREE -IBDK/include -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-T,apps/app.ld apps/start.c apps/runtime.c text.c BDK/runtime/gfx.c BDK/runtime/sound.c apps/barnocraft_game.o apps/barnocraft.c -o $@
+	$(CC) $(APP_CFLAGS) -DBARNIX_IN_TREE -IBDK/include -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-T,apps/app.ld apps/start.c apps/runtime.c kernel/text.c BDK/runtime/gfx.c BDK/runtime/sound.c apps/barnocraft_game.o apps/barnocraft.c -o $@
 	python3 scripts/mark_barnix_elf.py $@
 
 # Happy Gouse: the windowed environment and its built-in applications.
@@ -230,7 +237,7 @@ apps/gouse/gouse_assets.h: scripts/gouse_assets.py
 # Barnix Net for HTTP/HTTPS. Its fonts are a data file (scripts/web_font.py).
 apps/bin/gouse: $(WEB_JS_OBJECTS) $(WEB_LIBC) $(GOUSE_SOURCES) $(GOUSE_WEB_OBJECTS) apps/gouse/gouse.h apps/gouse/gouse_ru.h apps/gouse/gouse_assets.h apps/gouse/gouse_sounds.h apps/gouse/web.h apps/barnocraft_game.o $(BARNOCRAFT_CORE) $(APP_GFX_DEPS) $(BNET_DEPS)
 	mkdir -p apps/bin
-	$(CC) $(APP_CFLAGS) -DBARNIX_IN_TREE -IBDK/include -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-T,apps/app.ld apps/start.c apps/runtime.c text.c BDK/runtime/gfx.c BDK/runtime/sound.c $(BNET_RUNTIME) apps/barnocraft_game.o $(GOUSE_SOURCES) $(GOUSE_WEB_OBJECTS) $(WEB_JS_OBJECTS) $(WEB_LIBC) -lgcc -Wl,--gc-sections -o $@
+	$(CC) $(APP_CFLAGS) -DBARNIX_IN_TREE -IBDK/include -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-T,apps/app.ld apps/start.c apps/runtime.c kernel/text.c BDK/runtime/gfx.c BDK/runtime/sound.c $(BNET_RUNTIME) apps/barnocraft_game.o $(GOUSE_SOURCES) $(GOUSE_WEB_OBJECTS) $(WEB_JS_OBJECTS) $(WEB_LIBC) -lgcc -Wl,--gc-sections -o $@
 	@size=$$(stat -c %s $@); if [ $$size -gt 16777216 ]; then echo "$@ is $$size bytes: more than the 16 MiB Barnix file limit"; exit 1; fi
 	python3 scripts/mark_barnix_elf.py $@
 
@@ -261,11 +268,11 @@ usb-disk: apps scripts/make_usb_disk.py
 	python3 scripts/make_usb_disk.py --force $(USB_DISK) $(APPS)
 
 test-elf: apps
-	$(CC) -Wall -Wextra -I. tests/elf_test.c -o tests/elf_test
+	$(CC) -Wall -Wextra $(INCLUDES) tests/elf_test.c -o tests/elf_test
 	./tests/elf_test $(APPS)
 
 test:
-	$(CC) -ffreestanding -fno-builtin -Wall -Wextra -I. tests/fs_test.c -o tests/fs_test
+	$(CC) -ffreestanding -fno-builtin -Wall -Wextra $(INCLUDES) tests/fs_test.c -o tests/fs_test
 	python3 tests/ext2_test.py
 
 test-shell: barnix.iso
@@ -275,16 +282,16 @@ test-usb: barnix.iso
 	python3 tests/usb_test.py
 
 test-wifi:
-	$(CC) -O2 -Wall -Wextra -I. tests/wifi_crypto_test.c wifi_crypto.c -o tests/wifi_crypto_test
+	$(CC) -O2 -Wall -Wextra $(INCLUDES) tests/wifi_crypto_test.c drivers/net/wifi_crypto.c -o tests/wifi_crypto_test
 	python3 tests/wifi_crypto_test.py tests/wifi_crypto_test
-	$(CC) -O2 -ffreestanding -fno-builtin -Wall -Wextra -I. -Dmemcpy=vw_memcpy -Dmemset=vw_memset -Dmemcmp=vw_memcmp -Dstrcpy=vw_strcpy -c net_vwifi.c -o tests/net_vwifi_host.o
-	$(CC) -O2 -Wall -Wextra -I. tests/wifi_test.c wifi.c wifi_crypto.c tests/net_vwifi_host.o -o tests/wifi_test
+	$(CC) -O2 -ffreestanding -fno-builtin -Wall -Wextra $(INCLUDES) -Dmemcpy=vw_memcpy -Dmemset=vw_memset -Dmemcmp=vw_memcmp -Dstrcpy=vw_strcpy -c drivers/net/net_vwifi.c -o tests/net_vwifi_host.o
+	$(CC) -O2 -Wall -Wextra $(INCLUDES) tests/wifi_test.c drivers/net/wifi.c drivers/net/wifi_crypto.c tests/net_vwifi_host.o -o tests/wifi_test
 	python3 tests/wifi_test.py tests/wifi_test
 
 test-web: apps/gouse/web.bwf apps/gouse/web_bootstrap.h $(WEB_JS_HOST_OBJECTS)
-	$(CC) -O1 -g -fsanitize=address,undefined -Wall -Wextra -I. -D_GNU_SOURCE -DBARNIX_JS -DCONFIG_VERSION=\"2025-09-13\" tests/web_render.c apps/gouse/web_*.c $(WEB_JS_HOST_OBJECTS) -lm -lz -o tests/web_render
+	$(CC) -O1 -g -fsanitize=address,undefined -Wall -Wextra $(INCLUDES) -D_GNU_SOURCE -DBARNIX_JS -DCONFIG_VERSION=\"2025-09-13\" tests/web_render.c apps/gouse/web_*.c $(WEB_JS_HOST_OBJECTS) -lm -lz -o tests/web_render
 	python3 tests/web_test.py tests/web_render apps/gouse/web.bwf
-	$(CC) -O1 -g -fsanitize=address,undefined -Wall -Wextra -I. tests/web_jar_test.c apps/gouse/web_jar.c apps/gouse/web_util.c -o tests/web_jar_test
+	$(CC) -O1 -g -fsanitize=address,undefined -Wall -Wextra $(INCLUDES) tests/web_jar_test.c apps/gouse/web_jar.c apps/gouse/web_util.c -o tests/web_jar_test
 	./tests/web_jar_test
 
 test-gouse-web: barnix.iso
@@ -292,6 +299,16 @@ test-gouse-web: barnix.iso
 
 test-wifi-qemu: barnix.iso
 	python3 tests/wifi_qemu_test.py
+
+# One command for the whole suite. `check` runs host-only tests (seconds, no
+# QEMU); `check-all` adds the QEMU boot tests (minutes, headless).
+CHECK_HOST = test test-text test-shell-parse test-vfs test-font test-elf test-wifi test-permissions test-usb-hid test-mouse test-gl
+CHECK_QEMU = test-shell test-lang test-linux test-pipe test-pipeline test-exec test-linux-commands test-linux-shell test-process-shell test-install test-execute test-add-elf
+.PHONY: check check-all
+check: $(CHECK_HOST)
+	@echo "check: all host tests passed"
+check-all: check $(CHECK_QEMU)
+	@echo "check-all: all host and QEMU tests passed"
 
 test-repo:
 	bash -n scripts/update-repo.sh
@@ -301,95 +318,30 @@ test-repo:
 # Compile
 # =========================
 
-boot.o: boot.S
+# Kernel objects go to build/; vpath finds each source in its directory.
+vpath %.c $(KERNEL_DIRS)
+vpath %.S $(KERNEL_DIRS)
+
+build/%.o: %.c
+	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-smp_entry.o: smp_entry.S
+build/%.o: %.S
+	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-system_sound.o: system_sound.c system_sound.h system_sounds.h audio.h
-	$(CC) $(CFLAGS) -c $< -o $@
+build/system_sound.o: drivers/sound/system_sounds.h
+build/bssh_runner.o: userland/bssh-run.elf
+build/linux_probe.o: userland/linux-probe.elf
 
-kernel.o: kernel.c
-	$(CC) $(CFLAGS) -c kernel.c -o kernel.o
-
-barnix.o: barnix.c
-	$(CC) $(CFLAGS) -c barnix.c -o barnix.o
-
-fs.o: fs.c
-	$(CC) $(CFLAGS) -c fs.c -o fs.o
-
-disk.o: disk.c
-	$(CC) $(CFLAGS) -c disk.c -o disk.o
-
-net.o: net.c net.h net_driver.h netinfo.h wifi.h
-	$(CC) $(CFLAGS) -c net.c -o net.o
-
-net_e1000.o: net_e1000.c net.h net_driver.h
-	$(CC) $(CFLAGS) -c net_e1000.c -o net_e1000.o
-
-net_pcnet.o: net_pcnet.c net.h net_driver.h
-	$(CC) $(CFLAGS) -c net_pcnet.c -o net_pcnet.o
-
-net_realtek.o: net_realtek.c net_driver.h
-	$(CC) $(CFLAGS) -c net_realtek.c -o net_realtek.o
-
-net_tcp.o: net_tcp.c net.h netinfo.h
-	$(CC) $(CFLAGS) -c net_tcp.c -o net_tcp.o
-
-net_vwifi.o: net_vwifi.c wifi.h net_driver.h
-	$(CC) $(CFLAGS) -c net_vwifi.c -o net_vwifi.o
-
-wifi.o: wifi.c wifi.h wifi_crypto.h net.h netinfo.h net_driver.h
-	$(CC) $(CFLAGS) -c wifi.c -o wifi.o
-
-wifi_crypto.o: wifi_crypto.c wifi_crypto.h
-	$(CC) $(CFLAGS) -c wifi_crypto.c -o wifi_crypto.o
-
-linux_syscall.o: linux_syscall.c linux_abi.h
-	$(CC) $(CFLAGS) -c linux_syscall.c -o linux_syscall.o
-
-linux_idt.o: linux_idt.c linux_idt.h linux_abi.h
-	$(CC) $(CFLAGS) -c linux_idt.c -o linux_idt.o
-
-linux_int80.o: linux_int80.S
-	$(CC) $(CFLAGS) -c linux_int80.S -o linux_int80.o
-
-linux_tss.o: linux_tss.c linux_tss.h
-	$(CC) $(CFLAGS) -c linux_tss.c -o linux_tss.o
-
-linux_user.o: linux_user.S linux_user.h
-	$(CC) $(CFLAGS) -c linux_user.S -o linux_user.o
-
-usb_storage.o: usb_storage.c
-	$(CC) $(CFLAGS) -c $< -o $@
-
-bssh.o: bssh.c
-	$(CC) $(CFLAGS) -c bssh.c -o bssh.o
-
-bssh_runner.o: bssh_runner.S userland/bssh-run.elf
-	$(CC) $(CFLAGS) -c $< -o $@
-
-userland/bssh-run.elf: userland/bssh-run.c userland/start.S userland/syscall.h shell_parse.c shell_parse.h include/uapi/unistd.h makefile
-	$(CC) $(USER_CFLAGS) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-Ttext-segment=0x0b000000 userland/start.S userland/bssh-run.c shell_parse.c -o $@
-
-keyboard.o: keyboard.c
-	$(CC) $(CFLAGS) -c keyboard.c -o keyboard.o
-
-elf.o: elf.c
-	$(CC) $(CFLAGS) -c $< -o $@
-
-elf_format.o: elf_format.c
-	$(CC) $(CFLAGS) -c $< -o $@
-
-elf_enter.o: elf_enter.S
-	$(CC) $(CFLAGS) -c $< -o $@
+userland/bssh-run.elf: userland/bssh-run.c userland/start.S userland/syscall.h kernel/shell/shell_parse.c kernel/shell/shell_parse.h include/uapi/unistd.h makefile
+	$(CC) $(USER_CFLAGS) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-Ttext-segment=0x0b000000 userland/start.S userland/bssh-run.c kernel/shell/shell_parse.c -o $@
 
 # =========================
 # Kernel
 # =========================
 
-kernel.elf: $(OBJS) linker.ld
+kernel.elf: $(OBJS) kernel/linker.ld
 	$(LD) $(LDFLAGS) -o kernel.elf $(OBJS)
 
 # =========================
@@ -415,19 +367,19 @@ live-ext2-gcc.img: $(APPS) scripts/make_live_image.py scripts/install_apps.py sc
 # =========================
 
 # Hybrid: Legacy BIOS (i386-pc) and UEFI (x86_64-efi), also on a USB stick.
-barnix.iso: kernel.elf kernel-efi.elf live-ext2.img grub.cfg
+barnix.iso: kernel.elf kernel-efi.elf live-ext2.img kernel/grub.cfg
 	mkdir -p $(GRUB_DIR)
 	cp kernel.elf kernel-efi.elf $(BOOT_DIR)/
 	cp live-ext2.img $(BOOT_DIR)/
-	cp grub.cfg $(GRUB_DIR)/
+	cp kernel/grub.cfg $(GRUB_DIR)/
 	grub-mkrescue -o barnix.iso $(ISO_DIR) -- -volid BARNIX
 
 GCC_ISO_DIR = $(ISO_DIR)-gcc
-barnix-gcc.iso: kernel.elf kernel-efi.elf live-ext2-gcc.img grub.cfg
+barnix-gcc.iso: kernel.elf kernel-efi.elf live-ext2-gcc.img kernel/grub.cfg
 	mkdir -p $(GCC_ISO_DIR)/boot/grub
 	cp kernel.elf kernel-efi.elf $(GCC_ISO_DIR)/boot/
 	cp live-ext2-gcc.img $(GCC_ISO_DIR)/boot/live-ext2.img
-	cp grub.cfg $(GCC_ISO_DIR)/boot/grub/
+	cp kernel/grub.cfg $(GCC_ISO_DIR)/boot/grub/
 	grub-mkrescue -o $@ $(GCC_ISO_DIR) -- -volid BARNIX
 
 # =========================
@@ -481,16 +433,14 @@ run_usb: barnix.iso apps
 # =========================
 
 clean:
-	rm -f *.o
-	rm -f $(DEPS)
+	rm -rf build
 	rm -f tests/fs_test tests/vfs_test tests/text_test tests/shell_parse_test
 	rm -rf apps/gouse/obj
-	rm -f tests/elf_test $(APPS) apps/barnocraft_assets.h apps/gouse/gouse_assets.h apps/barnocraft_game.o apps/barnocraft_sounds.h apps/gouse/gouse_sounds.h apps/arcade_sounds.h system_sounds.h
-	rm -f kernel.elf kernel-test.elf kernel-test.d linux_probe.d userland/linux-probe.elf userland/exec-parent.elf userland/exec-child.elf userland/fork-probe.elf
-	rm -f tests/linux_selftest.o tests/linux_selftest.d
+	rm -f tests/elf_test $(APPS) apps/barnocraft_assets.h apps/gouse/gouse_assets.h apps/barnocraft_game.o apps/barnocraft_sounds.h apps/gouse/gouse_sounds.h apps/arcade_sounds.h drivers/sound/system_sounds.h
+	rm -f kernel.elf kernel-test.elf userland/linux-probe.elf userland/exec-parent.elf userland/exec-child.elf userland/fork-probe.elf
 	rm -f userland/bssh-run.elf userland/pipe-probe.elf
-	rm -f barnix.iso barnix-legacy-setup.iso barnix-efi-setup.iso kernel-efi.elf kernel-efi.d boot-efi.d
-	rm -f Setup/*.o Setup/*.d Setup/kernel.elf Setup/kernel-efi.elf
+	rm -f barnix.iso barnix-legacy-setup.iso barnix-efi-setup.iso kernel-efi.elf
+	rm -f Setup/kernel.elf Setup/kernel-efi.elf
 	rm -f live-ext2.img
 	rm -rf iso
 	rm -rf Setup/build
@@ -519,7 +469,7 @@ test-install: apps
 
 .PHONY: test-text test-lang
 test-text:
-	$(CC) -m32 -fno-builtin -Wall -Wextra -I. tests/text_test.c text.c keyboard.c timer.c mouse.c lang.c -o tests/text_test
+	$(CC) -m32 -fno-builtin -Wall -Wextra $(INCLUDES) tests/text_test.c kernel/text.c drivers/input/keyboard.c kernel/timer.c drivers/input/mouse.c kernel/lang.c -o tests/text_test
 	./tests/text_test
 
 test-lang: barnix.iso
@@ -528,8 +478,6 @@ test-lang: barnix.iso
 userland/linux-probe.elf: userland/linux-probe.S userland/linux-file-probe.c
 	$(CC) $(APP_CFLAGS) -nostdlib -static -no-pie -Wl,--build-id=none userland/linux-probe.S userland/linux-file-probe.c -o $@
 
-linux_probe.o: linux_probe.S userland/linux-probe.elf
-	$(CC) $(CFLAGS) -c $< -o $@
 
 .PHONY: test-linux
 test-linux: kernel-test.elf live-ext2.img
@@ -559,16 +507,18 @@ test-linux-commands: apps
 	python3 tests/linux_commands_test.py
 
 # The normal kernel contains neither the ABI probe nor its test boot entry.
-kernel-test.o: kernel.c makefile
+build/kernel-test.o: kernel/kernel.c makefile
+	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -DBARNIX_LINUX_SELFTEST -c $< -o $@
 
-tests/linux_selftest.o: tests/linux_selftest.c linux_exec.h fs.h barnix.h
+build/linux_selftest.o: tests/linux_selftest.c kernel/linux/linux_exec.h kernel/fs/fs.h kernel/barnix.h
+	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-kernel-test.elf: $(filter-out kernel.o,$(OBJS)) kernel-test.o tests/linux_selftest.o linux_probe.o linker.ld
-	$(LD) $(LDFLAGS) -o $@ $(filter-out kernel.o,$(OBJS)) kernel-test.o tests/linux_selftest.o linux_probe.o
+kernel-test.elf: $(filter-out build/kernel.o,$(OBJS)) build/kernel-test.o build/linux_selftest.o build/linux_probe.o kernel/linker.ld
+	$(LD) $(LDFLAGS) -o $@ $(filter-out build/kernel.o,$(OBJS)) build/kernel-test.o build/linux_selftest.o build/linux_probe.o
 
--include kernel-test.d tests/linux_selftest.d linux_probe.d
+-include build/kernel-test.d build/linux_selftest.d
 
 userland/exec-parent.elf: userland/exec-parent.c userland/start.S userland/syscall.h
 	$(CC) $(USER_CFLAGS) -nostdlib -static -no-pie -Wl,--build-id=none userland/start.S $< -o $@
@@ -603,7 +553,7 @@ test-gl:
 	./tests/gl/gl_test tests/gl
 
 test-shell-parse:
-	$(CC) -Wall -Wextra -Werror -I. tests/shell_parse_test.c shell_parse.c -o tests/shell_parse_test
+	$(CC) -Wall -Wextra -Werror $(INCLUDES) tests/shell_parse_test.c kernel/shell/shell_parse.c -o tests/shell_parse_test
 	./tests/shell_parse_test
 
 test-pipeline: test-shell-parse barnix.iso userland/linux-probe.elf
@@ -626,7 +576,7 @@ img:
 
 .PHONY: test-vfs
 test-vfs:
-	$(CC) -ffreestanding -fno-builtin -Wall -Wextra -I. tests/vfs_test.c -o tests/vfs_test
+	$(CC) -ffreestanding -fno-builtin -Wall -Wextra $(INCLUDES) tests/vfs_test.c -o tests/vfs_test
 	python3 tests/vfs_test.py
 
 .PHONY: test-disks
@@ -639,23 +589,27 @@ test-img:
 
 .PHONY: test-font
 test-font:
-	$(CC) -Wall -Wextra -I. tests/font_test.c text.c -o /tmp/barnix-font-test
+	$(CC) -Wall -Wextra $(INCLUDES) tests/font_test.c kernel/text.c -o /tmp/barnix-font-test
 	/tmp/barnix-font-test
 
 # Separate LiveCD installer; the regular kernel does not contain the wizard.
-Setup/kernel.o: kernel.c Setup/setup.h makefile
+build/setup/kernel.o: kernel/kernel.c Setup/setup.h makefile
+	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -DBARNIX_SETUP -c $< -o $@
 Setup/build/profiles.h: Setup/profiles.json Setup/build.py
 	python3 Setup/build.py --header
-Setup/wizard.o: Setup/wizard.c Setup/setup.h Setup/build/profiles.h
+build/setup/wizard.o: Setup/wizard.c Setup/setup.h Setup/build/profiles.h
+	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
-Setup/package.o: Setup/package.c Setup/package.h Setup/sha256.h
+build/setup/package.o: Setup/package.c Setup/package.h Setup/sha256.h
+	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
-Setup/sha256.o: Setup/sha256.c Setup/sha256.h
+build/setup/sha256.o: Setup/sha256.c Setup/sha256.h
+	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
-SETUP_EXTRA = Setup/package.o Setup/sha256.o
-Setup/kernel.elf: $(filter-out kernel.o,$(OBJS)) Setup/kernel.o Setup/wizard.o $(SETUP_EXTRA) linker.ld
-	$(LD) $(LDFLAGS) -o $@ $(filter-out kernel.o,$(OBJS)) Setup/kernel.o Setup/wizard.o $(SETUP_EXTRA)
+SETUP_EXTRA = build/setup/package.o build/setup/sha256.o
+Setup/kernel.elf: $(filter-out build/kernel.o,$(OBJS)) build/setup/kernel.o build/setup/wizard.o $(SETUP_EXTRA) kernel/linker.ld
+	$(LD) $(LDFLAGS) -o $@ $(filter-out build/kernel.o,$(OBJS)) build/setup/kernel.o build/setup/wizard.o $(SETUP_EXTRA)
 .PHONY: setup setup-build setup-build-gcc run-setup run-setup-gcc test-setup
 FIRMWARE ?= legacy
 export SETUP_DISK
@@ -688,11 +642,11 @@ test-setup-boot: setup-build
 	python3 tests/setup_boot_test.py
 test-setup: setup-build
 	python3 Setup/test_setup.py
--include Setup/kernel.d Setup/wizard.d
+-include build/setup/kernel.d build/setup/wizard.d build/setup/package.d build/setup/sha256.d
 
 .PHONY: test-large-fs
 test-large-fs:
-	$(CC) -O2 -ffreestanding -fno-builtin -Wall -Wextra -I. tests/large_fs_test.c -o tests/large_fs_test
+	$(CC) -O2 -ffreestanding -fno-builtin -Wall -Wextra $(INCLUDES) tests/large_fs_test.c -o tests/large_fs_test
 	python3 tests/large_fs_test.py
 
 .PHONY: test-storage-pci
@@ -704,19 +658,23 @@ test-setup-storage: setup-build
 	python3 Setup/test_storage.py
 
 # UEFI keeps the 32-bit kernel ABI; GRUB supplies a GOP framebuffer.
-boot-efi.o: boot.S makefile
+build/boot-efi.o: kernel/boot.S makefile
+	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -DBARNIX_EFI -c $< -o $@
-kernel-efi.o: kernel.c makefile
+build/kernel-efi.o: kernel/kernel.c makefile
+	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -DBARNIX_EFI -c $< -o $@
-kernel-efi.elf: $(filter-out kernel.o boot.o,$(OBJS)) boot-efi.o kernel-efi.o linker.ld
-	$(LD) $(LDFLAGS) -o $@ $(filter-out kernel.o boot.o,$(OBJS)) boot-efi.o kernel-efi.o
-Setup/kernel-efi.o: kernel.c Setup/setup.h makefile
+kernel-efi.elf: $(filter-out build/kernel.o build/boot.o,$(OBJS)) build/boot-efi.o build/kernel-efi.o kernel/linker.ld
+	$(LD) $(LDFLAGS) -o $@ $(filter-out build/kernel.o build/boot.o,$(OBJS)) build/boot-efi.o build/kernel-efi.o
+build/setup/kernel-efi.o: kernel/kernel.c Setup/setup.h makefile
+	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -DBARNIX_SETUP -DBARNIX_EFI -c $< -o $@
-Setup/wizard-efi.o: Setup/wizard.c Setup/setup.h Setup/build/profiles.h
+build/setup/wizard-efi.o: Setup/wizard.c Setup/setup.h Setup/build/profiles.h
+	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -DBARNIX_EFI -c $< -o $@
-Setup/kernel-efi.elf: $(filter-out kernel.o boot.o,$(OBJS)) boot-efi.o Setup/kernel-efi.o Setup/wizard-efi.o $(SETUP_EXTRA) linker.ld
-	$(LD) $(LDFLAGS) -o $@ $(filter-out kernel.o boot.o,$(OBJS)) boot-efi.o Setup/kernel-efi.o Setup/wizard-efi.o $(SETUP_EXTRA)
--include boot-efi.d kernel-efi.d Setup/kernel-efi.d Setup/wizard-efi.d
+Setup/kernel-efi.elf: $(filter-out build/kernel.o build/boot.o,$(OBJS)) build/boot-efi.o build/setup/kernel-efi.o build/setup/wizard-efi.o $(SETUP_EXTRA) kernel/linker.ld
+	$(LD) $(LDFLAGS) -o $@ $(filter-out build/kernel.o build/boot.o,$(OBJS)) build/boot-efi.o build/setup/kernel-efi.o build/setup/wizard-efi.o $(SETUP_EXTRA)
+-include build/boot-efi.d build/kernel-efi.d build/setup/kernel-efi.d build/setup/wizard-efi.d
 
 .PHONY: test-setup-efi
 test-setup-efi: setup-build
@@ -724,7 +682,7 @@ test-setup-efi: setup-build
 
 .PHONY: test-permissions
 test-permissions:
-	$(CC) -O2 -ffreestanding -fno-builtin -Wall -Wextra -I. tests/permissions_test.c -o tests/permissions_test
+	$(CC) -O2 -ffreestanding -fno-builtin -Wall -Wextra $(INCLUDES) tests/permissions_test.c -o tests/permissions_test
 	python3 tests/permissions_test.py
 
 .PHONY: test-system-permissions
@@ -737,7 +695,7 @@ test-partitions: barnix.iso
 
 .PHONY: test-mouse
 test-mouse:
-	$(CC) -Wall -Wextra -I. tests/mouse_test.c mouse.c -o /tmp/barnix-mouse-test
+	$(CC) -Wall -Wextra $(INCLUDES) tests/mouse_test.c drivers/input/mouse.c -o /tmp/barnix-mouse-test
 	/tmp/barnix-mouse-test
 
 .PHONY: test-mouse-paint
@@ -830,7 +788,7 @@ test-bcc-native: barnix.iso
 
 .PHONY: test-usb-hid test-usb-xhci
 test-usb-hid:
-	$(CC) -Wall -Wextra -I. tests/usb_hid_test.c usb_hid.c mouse.c -o /tmp/barnix-usb-hid-test
+	$(CC) -Wall -Wextra $(INCLUDES) tests/usb_hid_test.c drivers/usb/usb_hid.c drivers/input/mouse.c -o /tmp/barnix-usb-hid-test
 	/tmp/barnix-usb-hid-test
 
 test-usb-xhci: barnix.iso
@@ -884,12 +842,12 @@ apps/gouse/obj/web_js.o: apps/gouse/web_bootstrap.h
 
 .PHONY: test-web-js
 test-web-js: apps/gouse/web_bootstrap.h $(WEB_JS_HOST_OBJECTS)
-	$(CC) -O1 -g -fsanitize=address,undefined -I. -D_GNU_SOURCE -DBARNIX_JS -DCONFIG_VERSION=\"2025-09-13\" tests/web_js_test.c apps/gouse/web_*.c $(WEB_JS_HOST_OBJECTS) -lm -lz -o tests/web_js_test
+	$(CC) -O1 -g -fsanitize=address,undefined $(INCLUDES) -D_GNU_SOURCE -DBARNIX_JS -DCONFIG_VERSION=\"2025-09-13\" tests/web_js_test.c apps/gouse/web_*.c $(WEB_JS_HOST_OBJECTS) -lm -lz -o tests/web_js_test
 	./tests/web_js_test
 
 .PHONY: test-bulk-fs
 test-bulk-fs:
-	$(CC) -O2 -ffreestanding -fno-builtin -Wall -Wextra -I. tests/bulk_fs_test.c -o tests/bulk_fs_test
+	$(CC) -O2 -ffreestanding -fno-builtin -Wall -Wextra $(INCLUDES) tests/bulk_fs_test.c -o tests/bulk_fs_test
 	rm -f tests/bulk_fs_test.img && truncate -s 128M tests/bulk_fs_test.img
 	./tests/bulk_fs_test tests/bulk_fs_test.img
 	e2fsck -fn tests/bulk_fs_test.img

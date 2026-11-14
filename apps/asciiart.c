@@ -14,6 +14,7 @@ void print_color(const char *text, int color) {
 }
 
 int main(int argc, const char *const *argv) {
+    (void)argc; (void)argv;
     if (argument_count() < 2) {
         puts("Usage: asciiart TEXT");
         puts("Converts text to ASCII art");

@@ -1,7 +1,11 @@
 #ifndef WEB_JS_H
 #define WEB_JS_H
 #include "web.h"
+/* QuickJS is vendored code; its inline helpers trip -Wextra, ours must not. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
 #include "vendor/quickjs/quickjs.h"
+#pragma GCC diagnostic pop
 #define WJS_NODES 262144
 #define WJS_CANVASES 32
 typedef struct WJs WJs;

@@ -1,5 +1,5 @@
 #include "command.h"
-#include "../keyboard.h"
+#include "../include/abi/keyboard.h"
 #define WIDTH 78
 #define HEIGHT 36
 #define STRIDE ((WIDTH*3+3)&~3)

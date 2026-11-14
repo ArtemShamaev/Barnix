@@ -58,7 +58,7 @@ def main():
                               f'api->puts("Compatibility ABI {version} OK");return 0;}}')
             subprocess.run(['gcc', '-m32', '-ffreestanding', '-fno-pie', '-fno-stack-protector',
                             '-nostdlib', '-static', '-no-pie', '-Wl,--build-id=none',
-                            '-Wl,-T,' + str(ROOT / 'apps/app.ld'), '-I', str(ROOT),
+                            '-Wl,-T,' + str(ROOT / 'apps/app.ld'), '-I', str(ROOT / 'include/abi'),
                             str(source), '-o', str(binary)], check=True)
             data = bytearray(binary.read_bytes()); data[7:9] = bytes((255, version)); binary.write_bytes(data)
             debug(disk, f'write "{binary}" /bin/compat{version}')

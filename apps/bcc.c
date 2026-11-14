@@ -39,9 +39,11 @@ static int decode_string(const char *start) {
     while(*start&&*start!='"') {
         unsigned char c=(unsigned char)*start++;
         if(c=='\\') { c=(unsigned char)*start++; if(c=='n')c='\n';else if(c=='r')c='\r';else if(c=='t')c='\t';else if(c!='"'&&c!='\\')return -1; }
-        if(out+1>=sizeof(message))return -1;message[out++]=(char)c;
+        if(out+1>=sizeof(message))return -1;
+        message[out++]=(char)c;
     }
-    if(*start!='"')return -1;message[out]=0;return (int)out;
+    if(*start!='"')return -1;
+    message[out]=0;return (int)out;
 }
 static int has_main(const char *text) {
     const char *p=find((char *)text,"int main");
@@ -62,7 +64,8 @@ static const char *statement_end(const char *text) {
 static int output_name(const char *input,char *name) {
     const char *slash=input;for(const char *p=input;*p;p++)if(*p=='/')slash=p+1;
     copy(name,slash,64);char *dot=name;for(char *p=name;*p;p++)if(*p=='.')dot=p;
-    if(dot==name)dot=name+length(name);copy(dot,".elf",64-(unsigned int)(dot-name));return length(name)<24?0:-1;
+    if(dot==name)dot=name+length(name);
+    copy(dot,".elf",64-(unsigned int)(dot-name));return length(name)<24?0:-1;
 }
 int main(int argc,const char *const *argv) {
     if(argc<2||argc>3)return fail("usage: bcc SOURCE.c [OUTPUT.elf]");
@@ -70,7 +73,8 @@ int main(int argc,const char *const *argv) {
     if(!has_main(source))return fail("bcc: expected int main(...) { ... }");
     char *call=find_call(source,"puts");if(!call)call=find_call(source,"printf");
     if(!call)return fail("bcc: supported source is puts(\"text\") or printf(\"text\") in main");
-    while(*call&&*call!='"')call++;if(*call!='"'||decode_string(call)<0)return fail("bcc: expected one string literal");
+    while(*call&&*call!='"')call++;
+    if(*call!='"'||decode_string(call)<0)return fail("bcc: expected one string literal");
     const char *after=call+1;while(*after&&*after!='"')after++;if(*after=='"')after++;
     after=space(after);if(*after!=')')return fail("bcc: expected ')' after string literal");
     if(*space(after+1)!=';')return fail("bcc: expected ';' after output call");

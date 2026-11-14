@@ -1,7 +1,7 @@
 /* Barnix Execute: a single-task desktop and file manager inspired by Executive. */
 #include <barnix_graphics.h>
 #include "barnix_app.h"
-#include "../text.h"
+#include "../kernel/text.h"
 
 #define MAX_ENTRIES 256
 #define NAME_CAP 256

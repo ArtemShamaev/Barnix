@@ -1,5 +1,5 @@
 #include "syscall.h"
-#include "../shell_parse.h"
+#include "../kernel/shell/shell_parse.h"
 
 static ShellPlan plan;
 

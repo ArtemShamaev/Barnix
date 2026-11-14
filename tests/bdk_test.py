@@ -1,5 +1,6 @@
 """Test packaged SDK, real dotnet templates, native ELF and the public API."""
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -7,6 +8,8 @@ import tempfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
+ABI = int(re.search(r'#define BARNIX_APP_ABI (\d+)U',
+                    (ROOT / 'include/abi/app_abi.h').read_text())[1])
 DIST = ROOT / 'BDK/dist'
 ARTIFACTS = DIST / 'test-apps'
 
@@ -56,7 +59,7 @@ def main():
                 run(['dotnet', 'run', '--project', project], env=env)
                 binary = project / 'elf/app.elf'
                 data = binary.read_bytes()
-                assert data[:9] == b'\x7fELF\x01\x01\x01\xff\x0c'
+                assert data[:9] == b'\x7fELF\x01\x01\x01\xff' + bytes([ABI])
                 assert not run(['nm', '-u', binary], capture_output=True, text=True).stdout.strip()
                 exported = ARTIFACTS / f'{template}-{language}.elf'
                 shutil.copyfile(binary, exported); elfs.append(exported)
@@ -141,7 +144,7 @@ int main() {
         exported = ARTIFACTS / 'runtime.elf'
         shutil.copyfile(project / 'elf/runtime.elf', exported); elfs.append(exported)
         validator = work / 'elf-test'
-        run(['gcc', '-Wall', '-Wextra', '-I', ROOT, ROOT / 'tests/elf_test.c', '-o', validator])
+        run(['gcc', '-Wall', '-Wextra', '-I', ROOT / 'kernel', '-I', ROOT / 'kernel/fs', '-I', ROOT / 'kernel/linux', '-I', ROOT / 'include/abi', ROOT / 'tests/elf_test.c', '-o', validator])
         run([validator, *elfs], cwd=ROOT)
         # Test the independently distributable archive and optional include installation.
         release = work / 'release'

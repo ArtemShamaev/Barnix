@@ -22,7 +22,7 @@ gcc -m32 -march=i386 -ffreestanding -fno-pie -fno-stack-protector \
 
 Use the wrappers in `userland/syscall.h`. Compiler-emitted library helpers must
 be provided by the program. This is not yet a libc/toolchain for building Bash.
-See `../README-LINUX-REWRITE.md` for supported syscalls and loader limits.
+See `../docs/README-LINUX-REWRITE.md` for supported syscalls and loader limits.
 
 `make test-exec` checks `exec-parent.elf` and `exec-child.elf` across 34 successive
 image replacements, then runs `fork-probe.elf`. The same binaries run on Linux
@@ -40,7 +40,7 @@ switching during pipe I/O. The native test uses a 16-descriptor limit to match
 Barnix. Barnix-only launches also check deadlock reporting and recovery.
 
 `bssh-run.elf` is the Linux runner for Bssh pipelines and redirections. It shares
-`shell_parse.c` with the kernel shell, runs two children with a pipe between
+`kernel/shell/shell_parse.c` with the kernel shell, runs two children with a pipe between
 them, closes unused descriptors, and waits for both. Single commands with
 redirections replace the runner directly. The normal kernel embeds this ELF;
 it is not an extra `/bin` command and does not require a disk upgrade.

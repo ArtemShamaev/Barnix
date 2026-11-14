@@ -45,7 +45,8 @@ int hid_mouse_descriptor(HidMouse *m,const unsigned char *d,unsigned int length)
                     unsigned int kind=0;
                     if(u>=0x90001&&u<=0x90005)kind=10+(u&0xffff);
                     if(u==0x10030){kind=1;x=1;}if(u==0x10031){kind=2;y=1;}
-                    if(u==0x10038)kind=3;if(u==0xc0238)kind=4;
+                    if(u==0x10038)kind=3;
+                    if(u==0xc0238)kind=4;
                     if(kind){if(m->count==HID_MOUSE_FIELDS)return -1;
                         HidMouseField *f=&m->fields[m->count++];
                         *f=(HidMouseField){offsets[g.id]+i*g.size,g.size,g.id,kind,!!(value&4),g.minimum,g.maximum};}
@@ -66,7 +67,8 @@ static int value_at(const unsigned char *p,HidMouseField *f){
 }
 static int absolute(int value,int low,int high,int pixels){
     if(high<=low)return 0;
-    if(value<=low)return 0;if(value>=high)return pixels-1;
+    if(value<=low)return 0;
+    if(value>=high)return pixels-1;
     unsigned int range=(unsigned int)high-(unsigned int)low,position=(unsigned int)value-(unsigned int)low;
     while(range>65535){range>>=1;position>>=1;}
     return (int)(position*(unsigned int)(pixels-1)/range);

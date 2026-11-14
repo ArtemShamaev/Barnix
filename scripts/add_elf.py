@@ -108,8 +108,8 @@ def add(program, root=ROOT):
         saved = work / program.name
         shutil.copyfile(program, saved)
         validator = work / 'validate-elf'
-        subprocess.run(['cc', '-std=c11', '-I', str(ROOT), str(ROOT / 'scripts/validate_elf.c'),
-                        str(ROOT / 'elf_format.c'), '-o', str(validator)], check=True)
+        subprocess.run(['cc', '-std=c11', '-I', str(ROOT / 'kernel'), '-I', str(ROOT / 'kernel/fs'), '-I', str(ROOT / 'kernel/linux'), '-I', str(ROOT / 'include/abi'), str(ROOT / 'scripts/validate_elf.c'),
+                        str(ROOT / 'kernel/elf_format.c'), '-o', str(validator)], check=True)
         subprocess.run([str(validator), str(saved)], check=True)
         directory = root / 'Setup/extra-apps'
         directory.mkdir(exist_ok=True)

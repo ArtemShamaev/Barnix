@@ -5,7 +5,7 @@ import tempfile
 
 probe = pathlib.Path('userland/linux-probe.elf').resolve()
 with tempfile.TemporaryDirectory(prefix='barnix-linux-') as directory:
-    host = subprocess.run([str(probe), 'argument'], env={}, cwd=directory, capture_output=True)
+    host = subprocess.run([str(probe), 'argument'], env={'PATH': '/usr/bin:/bin'}, cwd=directory, capture_output=True)
     assert host.returncode == 37, (host.returncode, host.stdout, host.stderr)
     assert host.stdout == b'Linux ABI probe passed\n', host.stdout
     contents = (pathlib.Path(directory) / 'linux-probe.dat').read_bytes()

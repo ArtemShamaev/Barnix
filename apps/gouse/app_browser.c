@@ -5,7 +5,7 @@
 #include "gouse.h"
 #include "web.h"
 #include <barnix_net.h>
-#include "../../text.h"
+#include "../../kernel/text.h"
 #include "web_jar.h"
 
 extern const GApp app_notepad;

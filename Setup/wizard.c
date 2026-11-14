@@ -664,7 +664,11 @@ static int install_image(const MultibootInfo *info)
     /* Give every installation its own volume identity. This is not a secret:
      * mix the build UUID with keyboard timing (the running PIT) and device. */
     if (disk_read(2, verify_buffer)) return -1;
-    unsigned int mix = *(volatile unsigned int *)0x46c ^ target.sectors ^ (target.id << 24);
+    /* The BIOS tick counter at 0x46c; the empty asm hides the constant
+     * address from GCC, which otherwise warns about a zero-length object. */
+    volatile unsigned int *bios_ticks = (volatile unsigned int *)0x46c;
+    __asm__("" : "+r"(bios_ticks));
+    unsigned int mix = *bios_ticks ^ target.sectors ^ (target.id << 24);
     for (int i = 0; i < 16; i++) {
         unsigned char tick; __asm__ volatile("inb %1, %0" : "=a"(tick) : "Nd"((unsigned short)0x40));
         mix ^= tick + i; mix ^= mix << 13; mix ^= mix >> 17; mix ^= mix << 5;

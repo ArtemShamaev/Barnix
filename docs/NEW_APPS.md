@@ -269,7 +269,7 @@ rebuilt for ABI 7 and installed by root in `/usr/bin` for ordinary users to run 
 ## Barnocraft
 
 `barnocraft` is a voxel sandbox ported from the NASM x86-64 / X11 / OpenGL
-prototype (`barnocraft.asm`). It is installed in `/usr/bin` on the LiveCD and in the
+prototype (`apps/barnocraft-asm/barnocraft.asm`). It is installed in `/usr/bin` on the LiveCD and in the
 **Complete** Setup profile.
 
 The 80×80×32 world is generated exactly as in the original: value-noise
@@ -305,7 +305,7 @@ take/put/swap, RMB/`X` half/one, arrows move the selection), Esc pause, `Q` in
 pause quits, `F3` debug line.
 
 Textures come from `apps/barnocraft_textures.png` (64×64 atlas, see
-`make_textures.py`). `scripts/barnocraft_assets.py` turns it into
+`apps/barnocraft-asm/make_textures.py`). `scripts/barnocraft_assets.py` turns it into
 `apps/barnocraft_assets.h` (texels with mipmaps, sine table) during `make`.
 
 ## Happy Gouse
@@ -504,14 +504,14 @@ and stores their pixels deflated (unpacked with `bnet_inflate` at start-up).
     when it is left out), `bnm get-networks`, `bnm off` (disconnects the
     cable and Wi-Fi until the next `bnm internet`/`bnm connect`; programs
     then get `BARNIX_NET_OFF`), `bnm test-ping [HOST]`, `bnm resolve HOST`.
-- **Wi-Fi** (`wifi.c`): scanning, open and WPA2-Personal networks (4-way
+- **Wi-Fi** (`drivers/net/wifi.c`): scanning, open and WPA2-Personal networks (4-way
   and group key handshakes, CCMP), Ethernet framing for the TCP/IP stack.
   WPA3, WEP, TKIP and Enterprise networks are listed but refused. Real
   cards (Intel, Realtek, Atheros, Broadcom, MediaTek) are recognized but
   have no driver yet: they need vendor firmware. QEMU emulates no Wi-Fi
   hardware, so every `make run*` target and `Setup/run.py` add the Barnix
   virtual Wi-Fi card (an RTL8139 with MAC 02:57:49:46:49:xx carrying 802.11
-  frames, `net_vwifi.c`) and start `scripts/virtual_wifi.py`, a WPA2 access
+  frames, `drivers/net/net_vwifi.c`) and start `scripts/virtual_wifi.py`, a WPA2 access
   point named `Quemu-Password-root` with the password `root`, bridged to its
   own QEMU user network (192.168.77.0/24) and the Internet. `QEMU_WIFI=`
   (or `BARNIX_NO_WIFI=1` for Setup/run.py) runs without it; the wired card

@@ -55,6 +55,7 @@ int contains(const char *buf, const char *sub, int buf_len) {
 }
 
 int main(int argc, const char *const *argv) {
+    (void)argc; (void)argv;
     // Check language preference from /etc/sys-lang.cfg
     int is_russian = 0;
     

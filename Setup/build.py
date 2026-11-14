@@ -196,7 +196,7 @@ def header():
              '#define SETUP_DISTRIBUTION ' + json.dumps(data['distribution']),
              'static const char *profile_ids[] = {' + ','.join(json.dumps(p['id']) for p in data['profiles']) + '};',
              'static const char *profile_titles[] = {' + ','.join(json.dumps(p['title']) for p in data['profiles']) + '};',
-             'static const char *profile_descriptions[] = {' + ','.join(json.dumps(p['description']) for p in data['profiles']) + '};']
+             '__attribute__((unused)) static const char *profile_descriptions[] = {' + ','.join(json.dumps(p['description']) for p in data['profiles']) + '};']
     (BUILD / 'profiles.h').write_text('\n'.join(lines) + '\n')
 
 

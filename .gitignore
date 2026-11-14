@@ -54,7 +54,7 @@ qemu-w64-setup-20260729.exe
 /apps/barnocraft_sounds.h
 /apps/gouse/gouse_sounds.h
 /apps/arcade_sounds.h
-/system_sounds.h
+/drivers/sound/system_sounds.h
 tests/gl/
 
 /tests/bulk_fs_test
@@ -83,3 +83,6 @@ tests/gl/
 /tests/web_render
 /tests/wifi_test
 /tests/wifi_crypto_test
+/build/
+/BDK/tools/csharp/bin/
+/BDK/tools/csharp/obj/

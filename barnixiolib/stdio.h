@@ -4,7 +4,7 @@
 #ifdef BARNIX_BDK
 #include <barnix/app_abi.h>
 #else
-#include "../app_abi.h"
+#include "../include/abi/app_abi.h"
 #endif
 #include <stddef.h>
 #include <stdarg.h>
