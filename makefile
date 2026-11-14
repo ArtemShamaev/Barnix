@@ -871,9 +871,9 @@ test-bulk-fs:
 # =========================
 # x86_64 port (branch x86_64), stage 0: long-mode boot on BIOS and UEFI
 # =========================
-CFLAGS64 = -O2 -m64 -mcmodel=small -mno-red-zone -mgeneral-regs-only -ffreestanding -nostdlib -fno-pie -fno-pic -fno-stack-protector -U_FORTIFY_SOURCE -fno-asynchronous-unwind-tables -Wall -Wextra $(WERROR) $(INCLUDES) -MMD -MP
+CFLAGS64 = -O2 -m64 -Ikernel/arch/x86_64 -mcmodel=small -mno-red-zone -mgeneral-regs-only -ffreestanding -nostdlib -fno-pie -fno-pic -fno-stack-protector -U_FORTIFY_SOURCE -fno-asynchronous-unwind-tables -Wall -Wextra $(WERROR) $(INCLUDES) -MMD -MP
 LDFLAGS64 = -m elf_x86_64 -z max-page-size=0x1000 -T kernel/arch/x86_64/linker.ld
-OBJS64 = build/x86_64/boot.o build/x86_64/stage0.o
+OBJS64 = build/x86_64/boot.o build/x86_64/cpu_entry.o build/x86_64/cpu.o build/x86_64/stage0.o
 
 build/x86_64/%.o: kernel/arch/x86_64/%.S makefile
 	@mkdir -p $(@D)

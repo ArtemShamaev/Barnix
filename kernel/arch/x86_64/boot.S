@@ -115,12 +115,30 @@ long_mode_entry:
 no_long_mode_text:
     .asciz "Barnix: this CPU does not support 64-bit long mode."
 
+
+/* The GDT is written at run time (TSS, Linux TLS), so it lives in .data.
+ * Selectors: 0x08 kernel code 64, 0x10 kernel data, 0x1b/0x23 user code 32 /
+ * data (Linux i386 programs), 0x2b user code 64, 0x33 Linux TLS (entry 6, as
+ * on the 32-bit kernel), 0x38 kernel code 32 (Barnix programs), 0x40 TSS. */
+.section .data
 .align 16
+.global gdt64
 gdt64:
-    .quad 0                     /* null */
-    .quad 0x00AF9A000000FFFF    /* 0x08: kernel code, 64-bit */
-    .quad 0x00CF92000000FFFF    /* 0x10: kernel data */
+    .quad 0                     /* 0x00 null */
+    .quad 0x00AF9A000000FFFF    /* 0x08 kernel code, 64-bit */
+    .quad 0x00CF92000000FFFF    /* 0x10 kernel data */
+    .quad 0x00CFFA000000FFFF    /* 0x18 user code, 32-bit */
+    .quad 0x00CFF2000000FFFF    /* 0x20 user data */
+    .quad 0x00AFFA000000FFFF    /* 0x28 user code, 64-bit */
+    .global gdt64_tls
+gdt64_tls:
+    .quad 0                     /* 0x30 Linux i386 TLS */
+    .quad 0x00CF9A000000FFFF    /* 0x38 kernel code, 32-bit compatibility */
+    .global gdt64_tss
+gdt64_tss:
+    .quad 0, 0                  /* 0x40 64-bit TSS (16 bytes) */
 gdt64_end:
+.global gdt64_descriptor
 gdt64_descriptor:
     .word gdt64_end - gdt64 - 1
     .quad gdt64

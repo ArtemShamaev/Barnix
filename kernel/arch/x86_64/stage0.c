@@ -2,6 +2,7 @@
  * and UEFI. Prints the Multiboot memory map to the VGA text screen. */
 #include <stdint.h>
 #include "multiboot.h"
+#include "cpu.h"
 
 __attribute__((section(".multiboot"), used))
 const unsigned int multiboot_header[] = { 0x1BADB002, 0, -(0x1BADB002) };
@@ -32,11 +33,24 @@ static void hex(uint64_t value)
     for (int shift = 60; shift >= 0; shift -= 4) put("0123456789abcdef"[(value >> shift) & 15]);
 }
 
+
+static void vga_report(const char *report)
+{
+    row = 13; column = 0;
+    for (const char *p = report; *p; p++) {
+        if (*p == '\n') { row++; column = 0; continue; }
+        if (row < 25) vga[row * 80 + column] = 0x4f00 | (unsigned char)*p;
+        if (++column == 80) { row++; column = 0; }
+    }
+}
+
 void kernel_main(uint32_t magic, const MultibootInfo *info)
 {
     outb(0x3f9, 0); outb(0x3fb, 0x80); outb(0x3f8, 1); outb(0x3f9, 0);   /* 115200 baud */
     outb(0x3fb, 3); outb(0x3fa, 0xc7);                                   /* 8N1, FIFO */
     for (int i = 0; i < 80 * 25; i++) vga[i] = 0x0f20;
+    cpu_init();
+    cpu_report_output = vga_report;
     text("Barnix x86_64: long mode OK\n");
     uint64_t rsp;
     __asm__ volatile("mov %%rsp, %0" : "=r"(rsp));
@@ -55,4 +69,19 @@ void kernel_main(uint32_t magic, const MultibootInfo *info)
         text("usable RAM: "); hex(total >> 20); text(" MiB\n");
     }
     text("stage 0 done\n");
+
+    /* Exception self-test: "fault=div|gp|pf|stack" on the GRUB command line. */
+    const char *line = (info->flags & MULTIBOOT_CMDLINE) ? (const char *)(uintptr_t)info->command_line : "";
+    const char *fault = 0;
+    for (const char *p = line; *p; p++)
+        if (p[0] == 'f' && p[1] == 'a' && p[2] == 'u' && p[3] == 'l' && p[4] == 't' && p[5] == '=') fault = p + 6;
+    if (!fault) return;
+    text("triggering fault: "); text(fault); text("\n");
+    if (fault[0] == 'd') __asm__ volatile("xor %%ecx, %%ecx; mov $1, %%eax; xor %%edx, %%edx; div %%ecx" ::: "rax", "rcx", "rdx");
+    if (fault[0] == 'g') { volatile uint64_t *bad = (volatile uint64_t *)0x8000000000000000ULL; (void)*bad; }
+    if (fault[0] == 'p') { volatile uint64_t *far = (volatile uint64_t *)0x100000000000ULL; (void)*far; }
+    /* A stack in unmapped memory: the #PF cannot be pushed, so the double
+     * fault must arrive on its own IST stack. */
+    if (fault[0] == 's') __asm__ volatile("mov $0x100000000000, %%rsp; push %%rax" ::: "memory");
+    text("fault did not trigger\n");
 }
