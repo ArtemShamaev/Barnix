@@ -3,7 +3,9 @@ import subprocess
 import time
 
 
-def run(disk, directory, commands, live_only=False, command_timeout=10, extra_disks=(), extra_args=()):
+def run(disk, directory, commands, live_only=False, command_timeout=10, extra_disks=(), extra_args=(),
+        halts=False):
+    """halts: the last command stops the machine (a panic); returns its screen."""
     args = ['qemu-system-i386', '-m', '256M', '-boot', 'd', '-drive', 'file=barnix.iso,media=cdrom,if=ide,index=3',
             '-display', 'none', '-serial', 'none', '-monitor', 'stdio', '-no-reboot']
     if disk is not None:
@@ -92,15 +94,19 @@ def run(disk, directory, commands, live_only=False, command_timeout=10, extra_di
                 current = text[start:] if start >= 0 else text
                 if expected in current and text.rstrip().endswith('bssh>'):
                     break
+                if halts and expected in text and 'System halted.' in text:
+                    break
                 # Long output (help) pauses after each page: continue it.
                 if '-- more:' in text.rstrip().splitlines()[-1]:
                     monitor('sendkey spc 1')
                 if time.monotonic() >= deadline:
                     raise AssertionError((command, expected, text))
                 time.sleep(0.1)
-        print('Shell sequence passed')
+        if not halts:
+            print('Shell sequence passed')
         monitor('quit')
         process.wait(timeout=5)
+        return text
     finally:
         if process.poll() is None:
             process.terminate()

@@ -1,3 +1,4 @@
+#include "fault.h"
 #include "elf.h"
 #include "lang.h"
 #include "elf_format.h"
@@ -204,7 +205,13 @@ static int run_once(const char *name, int argc, const char *const *argv, int *st
     compatibility.version=executable[8];
     keyboard_events_reset();
     mouse_motion(0, 0);
+    unsigned int image_end = APP_LOAD_MIN;
+    for (unsigned int i = 0; i < plan.count; i++)
+        if (plan.segments[i].address + plan.segments[i].memory_size > image_end)
+            image_end = plan.segments[i].address + plan.segments[i].memory_size;
+    unsigned int paging = fault_guard_enter(image_end);
     *status = elf_enter(plan.entry, &compatibility, argc, argv, (void *)APP_STACK_TOP);
+    fault_guard_leave(paging);
     console_ansi_reset();
     if (!nested) { video_present(0, 0, 0); audio_reset(); memory_app_release(); last_frame = 0; area_w = area_h = 0; run_as_root = 0; }
     else audio_stop(-1);

@@ -4,6 +4,7 @@
 #include "memory.h"
 #include "barnix.h"
 #include "usb_time.h"
+#include "fault.h"
 
 #define SMP_MAX 16
 #define STACK_BYTES 16384U
@@ -28,7 +29,8 @@ static TrampolineFields *fields;
 static volatile unsigned int started, generation, ticket, done, total, sleeping[SMP_MAX];
 static void (*volatile job)(void *, unsigned int);
 static void *volatile job_argument;
-static unsigned long long ap_idt[3];
+static unsigned long long ap_idt[32];
+static unsigned int stacks_base;   /* extra cores' stacks, for fault reports */
 static struct { unsigned short limit; unsigned int base; } __attribute__((packed)) ap_idtr;
 
 static unsigned int atomic_add(volatile unsigned int *value, unsigned int add)
@@ -148,10 +150,11 @@ void smp_init(void)
     } else wrmsr(0x80f, rdmsr(0x80f) | 0x1ff);
     unsigned int page = trampoline_page();
     void *stacks = memory_kernel_alloc(SMP_MAX * STACK_BYTES);
+    stacks_base = (unsigned int)stacks;
     if (!page || !stacks) return;
 
-    unsigned int nmi = (unsigned int)smp_nmi;
-    ap_idt[2] = (nmi & 0xffffU) | 0x08U << 16 | (unsigned long long)(0x8e00U | (nmi & 0xffff0000U)) << 32;
+    /* CPU exceptions report a KERNEL PANIC; vector 2 (NMI) wakes the core. */
+    fault_fill_idt((uint64_t *)ap_idt, smp_nmi);
     ap_idtr.limit = sizeof(ap_idt) - 1; ap_idtr.base = (unsigned int)ap_idt;
 
     unsigned char *code = (unsigned char *)page;
@@ -182,6 +185,11 @@ void smp_init(void)
 
 unsigned int smp_cpus(void) { return started + 1; }
 
+int smp_on_extra_core(unsigned int esp)
+{
+    return stacks_base && esp >= stacks_base && esp - stacks_base < SMP_MAX * STACK_BYTES;
+}
+
 void smp_parallel(void (*fn)(void *, unsigned int), void *argument, unsigned int count)
 {
     if (!fn || !count) return;
@@ -198,5 +206,5 @@ void smp_parallel(void (*fn)(void *, unsigned int), void *argument, unsigned int
     for (unsigned int i = 0; i < SMP_MAX; i++) if (sleeping[i]) wake = 1;
     if (wake) ipi_others(0x0400);         /* NMI */
     run_jobs(tag);
-    while (done < count) __asm__ volatile("pause");
+    while (done < count) { fault_check_extra_cores(); __asm__ volatile("pause"); }
 }

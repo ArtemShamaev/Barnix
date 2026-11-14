@@ -2,6 +2,7 @@
 #include "keyboard.h"
 #include "text.h"
 #include "console_video.h"
+#include "video_rgb.h"
 /* =========================================================
    Barnix I/O Library Implementation
    Copyright (C) Barnino Systems, all rights reserved.
@@ -864,6 +865,7 @@ void banner(const char *title)
 
 void panic(const char *msg)
 {
+    video_leave();   /* a program may have the screen in graphics mode */
     clear();
 
     banner("KERNEL PANIC");

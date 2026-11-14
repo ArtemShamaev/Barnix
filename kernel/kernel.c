@@ -18,6 +18,7 @@
 #include "linux_tss.h"
 #include "linux_exec.h"
 #include "usb_time.h"
+#include "fault.h"
 #ifdef BARNIX_SETUP
 #include "Setup/setup.h"
 #endif
@@ -162,6 +163,7 @@ static int select_boot_uuid(const char *text)
 
 void kernel_main(unsigned int magic, const MultibootInfo *info)
 {
+    fault_init();   /* from here on a CPU exception shows a panic, not a reboot */
     if (magic == MULTIBOOT_BOOT_MAGIC) memory_init(info);
 #ifdef BARNIX_EFI
     /* A framebuffer above 4 GiB (Intel laptops) is moved below it first. */

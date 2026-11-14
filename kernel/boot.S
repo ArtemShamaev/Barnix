@@ -65,6 +65,10 @@ gdt_tss_descriptor:
     .global gdt_tls_descriptor
 gdt_tls_descriptor:
     .quad 0
+    /* Entry 7: TSS of the double-fault task (kernel/fault.c). */
+    .global gdt_fault_tss_descriptor
+gdt_fault_tss_descriptor:
+    .quad 0
 gdt_end:
 
 gdt_descriptor:

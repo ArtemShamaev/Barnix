@@ -55,6 +55,8 @@ OBJS = $(addprefix build/,$(addsuffix .o,\
 	memory \
 	smp \
 	smp_entry \
+	fault \
+	fault_entry \
 	audio \
 	system_sound \
 	settings \
@@ -82,8 +84,11 @@ rebuild:
 	$(MAKE) all
 
 # Programs use SSE2 for float/double (as Windows 10 requires): Pentium 4 /
-# Athlon 64 or newer. The kernel itself stays integer-only.
-APP_FP = -march=pentium4 -mfpmath=sse
+# Athlon 64 or newer. The kernel itself stays integer-only. Like Win32, the
+# kernel only guarantees a 4-byte aligned stack when it calls into a program
+# (entry, parallel() jobs on other cores), so programs realign it themselves
+# where SSE spills need 16 bytes: movaps on a misaligned stack is a #GP.
+APP_FP = -march=pentium4 -mfpmath=sse -mincoming-stack-boundary=2
 APP_CFLAGS = -m32 $(APP_FP) -O2 -ffreestanding -fno-pie -fno-pic -fno-stack-protector -U_FORTIFY_SOURCE -Wall -Wextra $(INCLUDES) -Iapps -Ibarnixiolib
 LINUX_COMMANDS = echo pwd cat ls touch write append cp true false
 COMMANDS = beep play df diskinfo devices clear rm mkdir cd rmdir stat mv panic sync mount format unmount help init macro bnm get git brm chmod su sudo whoami useradd theme snake pong fdisk paint execute bcc barnocraft gouse gldemo glrunner java nova
@@ -305,7 +310,7 @@ test-wifi-qemu: barnix.iso
 # One command for the whole suite. `check` runs host-only tests (seconds, no
 # QEMU); `check-all` adds the QEMU boot tests (minutes, headless).
 CHECK_HOST = test test-text test-shell-parse test-vfs test-font test-elf test-wifi test-permissions test-usb-hid test-mouse test-gl
-CHECK_QEMU = test-shell test-lang test-linux test-pipe test-pipeline test-exec test-linux-commands test-linux-shell test-process-shell test-install test-execute test-add-elf
+CHECK_QEMU = test-faults test-shell test-lang test-linux test-pipe test-pipeline test-exec test-linux-commands test-linux-shell test-process-shell test-install test-execute test-add-elf
 .PHONY: check check-all
 check: $(CHECK_HOST)
 	@echo "check: all host tests passed"
@@ -787,6 +792,14 @@ bcc-demo: BDK/tools/bcc.py BDK/examples/bccdemo.c BDK/include/barnix_graphics.h 
 .PHONY: test-bcc-native
 test-bcc-native: barnix.iso
 	python3 tests/bcc_native_test.py
+
+# Deliberate CPU exceptions: each must show a KERNEL PANIC with its cause.
+tests/fault_probe.elf: tests/fault_probe.c apps/command.h apps/start.c apps/runtime.c kernel/text.c apps/barnix_app.h include/abi/app_abi.h apps/app.ld makefile
+	$(CC) $(APP_CFLAGS) -O1 -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-T,apps/app.ld apps/start.c apps/runtime.c kernel/text.c tests/fault_probe.c -o $@
+	python3 scripts/mark_barnix_elf.py $@
+.PHONY: test-faults
+test-faults: barnix.iso tests/fault_probe.elf
+	python3 tests/fault_test.py
 
 .PHONY: test-usb-hid test-usb-xhci
 test-usb-hid:
