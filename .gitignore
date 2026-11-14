@@ -9,6 +9,9 @@
 
 /barnix-ext2.img
 /live-ext2.img
+/live-ext2-gcc.img
+/barnix-gcc.iso
+/iso-gcc/
 /barnix-usb.img
 __pycache__/
 
@@ -46,18 +49,37 @@ qemu-w64-setup-20260729.exe
 
 /BDK/dist/
 /BDK/**/__pycache__/
-1c1
-<
-./РАСПАКУЙ.zip
----
->
-"./\320\240\320\220\320\241\320\237\320\220\320\232\320\243\320\231.zip"
-1c1
-<
-./РАСПАКУЙ.zip
----
->
-"./\320\240\320\220\320\241\320\237\320\220\320\232\320\243\320\231.zip"
-./РАСПАКУЙ.zip
-./Setup/execute-backup-bmrs154t/target-efi.img
-./Setup/target-efi.img
+/apps/barnocraft_assets.h
+/apps/gouse/gouse_assets.h
+/apps/barnocraft_sounds.h
+/apps/gouse/gouse_sounds.h
+/apps/arcade_sounds.h
+/system_sounds.h
+tests/gl/
+
+/tests/bulk_fs_test
+/tests/bulk_fs_test.img
+/tools/python/build/
+/tools/python/root/
+/РАСПАКУЙ.zip
+/Setup/execute-backup-*/
+/Setup/target-efi.img
+
+# Build outputs
+/apps/*.elf
+/BDK/*.elf
+/apps/gouse/obj/
+/apps/java/obj/
+/barnocraft
+/barnix-*.iso
+/barnix-*.img
+/live-ext2*.img
+*.core
+/.venv/
+
+# Host-side test binaries
+/tests/web_jar_test
+/tests/web_js_test
+/tests/web_render
+/tests/wifi_test
+/tests/wifi_crypto_test
