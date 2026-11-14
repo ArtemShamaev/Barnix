@@ -93,6 +93,16 @@ static void run_jobs(unsigned int tag)
 static void ap_main(unsigned int index)
 {
     __asm__ volatile("lidt %0" :: "m"(ap_idtr));
+    /* INIT leaves CR0.CD/NW set: without this the core runs with its caches
+     * disabled. Match the boot processor: caches on, x87 and SSE enabled. */
+    unsigned int cr0, cr4;
+    __asm__ volatile("mov %%cr0, %0" : "=r"(cr0));
+    cr0 &= ~(0x60000000U | 0x4U | 0x8U);   /* CD, NW, EM, TS */
+    cr0 |= 0x2U;                           /* MP */
+    __asm__ volatile("mov %0, %%cr0; wbinvd" :: "r"(cr0) : "memory");
+    __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+    cr4 |= 0x600U;                         /* OSFXSR, OSXMMEXCPT */
+    __asm__ volatile("mov %0, %%cr4; fninit" :: "r"(cr4) : "memory");
     atomic_add(&started, 1);
     unsigned int seen = generation, spins = 0;
     for (;;) {

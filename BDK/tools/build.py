@@ -32,8 +32,8 @@ def build(project, native_sources=None):
     cc = os.environ.get('CC', 'clang' if os.name == 'nt' else 'gcc')
     cxx = os.environ.get('CXX', 'clang++' if os.name == 'nt' else 'g++')
     clang = 'clang' in run([cc, '--version'], capture_output=True, text=True).stdout.lower()
-    # float/double run on the x87 FPU (BDK start enables it); no SSE/MMX.
-    flags = ['-m32', '-march=i386', '-mno-sse', '-mno-mmx', '-O2',
+    # float/double use SSE2 (Pentium 4 or newer, as Windows 10 requires).
+    flags = ['-m32', '-march=pentium4', '-mfpmath=sse', '-O2',
              '-fwrapv', '-ffunction-sections', '-fdata-sections', '-ffreestanding', '-fno-builtin', '-fno-pie', '-fno-pic', '-fno-stack-protector',
              '-Wall', '-Wextra', '-nostdinc', '-DBARNIX_BDK', '-I', sdk / 'include', '-I', sdk / 'runtime',
              '-I', project / 'src']
