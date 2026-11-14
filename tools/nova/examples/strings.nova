@@ -1,0 +1,27 @@
+// Работа со строками: все методы java.lang.String доступны напрямую
+void main(string[] args):
+    var s = "  Write once, run everywhere  "
+    var t = s.trim()
+    print(t)
+    print(t.toUpperCase())
+    print("длина: " + t.length())
+    print("содержит 'run': " + t.contains("run"))
+    print("первый символ: " + t.charAt(0))   // char сразу становится string
+
+    var words = t.split(", ")
+    print(words)
+    for w in words:
+        print(" - " + w)
+
+    var csv = "10;20;30;12"
+    int sum = 0
+    for part in csv.split(";"):
+        sum += toInt(part)
+    print("сумма: " + sum)
+
+    var greet = "Hi"
+    greet += ", " + args.length + " args"
+    print(greet)
+
+    if "apple" < "banana":
+        print("строки сравниваются и по порядку")

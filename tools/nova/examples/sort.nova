@@ -1,0 +1,41 @@
+// Массивы, while, break/continue, однострочные блоки
+void bubbleSort(int[] a):
+    var n = a.length
+    var swapped = true
+    while swapped:
+        swapped = false
+        for i in 1..n:
+            if a[i - 1] > a[i]:
+                var tmp = a[i]
+                a[i] = a[i - 1]
+                a[i - 1] = tmp
+                swapped = true
+        n -= 1
+
+bool isPrime(int n):
+    if n < 2: return false
+    var d = 2
+    while d * d <= n:
+        if n % d == 0: return false
+        d += 1
+    return true
+
+void main():
+    var nums = [5, 3, 9, 1, 7, 2, 8]
+    bubbleSort(nums)
+    print(nums)
+
+    int[] primes = new int[10]
+    var found = 0
+    var k = 0
+    while true:
+        k += 1
+        if not isPrime(k): continue
+        primes[found] = k
+        found += 1
+        if found == primes.length: break
+    print("первые 10 простых: " + primes)
+
+    var grid = [[1, 2, 3], [4, 5, 6]]
+    print(grid)
+    print(grid[1][2])

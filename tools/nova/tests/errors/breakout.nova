@@ -1,0 +1,3 @@
+// ожидается: break вне цикла
+void main():
+    break

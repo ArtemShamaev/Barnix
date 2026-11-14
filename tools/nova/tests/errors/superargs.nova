@@ -1,0 +1,9 @@
+// ожидается: требует аргументы
+class A:
+    init(int x):
+        pass
+class B(A):
+    init():
+        print("hi")
+void main():
+    pass

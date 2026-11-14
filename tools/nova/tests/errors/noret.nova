@@ -1,0 +1,7 @@
+// ожидается: не во всех ветках
+int f(int a):
+    if a > 0:
+        return 1
+
+void main():
+    print(f(1))

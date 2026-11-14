@@ -1,0 +1,3 @@
+// ожидается: ожидался тип int, а получен string
+void main():
+    int x = "hello"

@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Обёртка: ./nova build hello.nova
+exec java -jar "$(dirname "$(readlink -f "$0")")/build/nova.jar" "$@"

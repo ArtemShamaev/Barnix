@@ -152,7 +152,7 @@ def add(program, root=ROOT):
             raise
         print(f'Complete: {directory / program.name} (included by the next make setup)')
         for disk, _, _ in pending[:-1]:
-            print(f'{disk}: /bin/{program.name} and /{program.name}')
+            print(f'{disk}: /usr/bin/{program.name} and /{program.name}')
         if len(pending) == 1:
             print('No disks/*.img found; ELF registered for Complete only.')
 

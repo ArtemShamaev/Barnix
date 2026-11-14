@@ -1,0 +1,67 @@
+// ООП: наследование, переопределение, super, toString
+class Shape:
+    string name
+
+    init(string name):
+        this.name = name
+
+    double area():
+        return 0.0
+
+    string toString():
+        return name + " с площадью " + area()
+
+class Circle(Shape):
+    double r
+
+    init(double r):
+        super("круг")
+        this.r = r
+
+    double area():
+        return 3.14159 * r * r
+
+class Rect(Shape):
+    double w
+    double h
+
+    init(double w, double h):
+        super("прямоугольник")
+        this.w = w
+        this.h = h
+
+    double area():
+        return w * h
+
+class Square(Rect):
+    init(double side):
+        super(side, side)
+        name = "квадрат"
+
+    string toString():
+        return "[" + super.toString() + "]"
+
+class Counter:
+    int count = 0
+    int step = 1
+
+    void tick():
+        count += step
+
+void main():
+    Shape[] shapes = [new Circle(1.5), new Rect(2, 3), new Square(4)]
+    double total = 0
+    for s in shapes:
+        print(s)
+        total += s.area()
+    print("Суммарная площадь: " + total)
+
+    var c = new Counter()
+    c.step = 5
+    for i in 0..3:
+        c.tick()
+    print("Counter: " + c.count)
+
+    Shape nothing = null
+    if nothing == null:
+        print("null тоже есть, но только для ссылочных типов")
