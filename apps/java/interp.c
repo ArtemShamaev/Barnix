@@ -46,8 +46,20 @@ static Slot *frame_top(Thread *t)
 
 static int ret_slots(char r) { return r == 'V' ? 0 : r == 'J' || r == 'D' ? 2 : 1; }
 
+/* Headroom kept below every nested invoke for natives (OpenGL, inflate). */
+#define C_STACK_RESERVE (64U * 1024U)
+
 int invoke(Thread *t, Method *m, Slot *args, Slot *result)
 {
+    /* Natives, class initializers and reflection re-enter the interpreter
+     * through this C function. The C stack is plain heap memory: running
+     * past its end would corrupt the heap, so report it to Java instead. */
+    volatile char probe;
+    uintptr_t here = (uintptr_t)&probe, low = (uintptr_t)t->c_stack;
+    if (t->c_stack && here >= low && here - low < C_STACK_RESERVE) {
+        throw_new(t, "java/lang/StackOverflowError", "native stack");
+        return -1;
+    }
     if (m->access & ACC_NATIVE) {
         bind_native(t, m);
         if (!m->native) return -1;

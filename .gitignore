@@ -88,3 +88,4 @@ tests/gl/
 /BDK/tools/csharp/obj/
 /kernel64.elf
 /barnix64.iso
+/tests/fault_probe.elf
