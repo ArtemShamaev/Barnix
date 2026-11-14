@@ -17,6 +17,7 @@ itself. The file is zlib data (inflated by bnet_inflate) of:
               padded to whole bytes.
 Little-endian throughout.
 """
+import os
 import pathlib
 import struct
 import sys
@@ -25,7 +26,13 @@ import zlib
 from PIL import Image, ImageDraw, ImageFont
 
 BASE = 28
-FONTS = '/usr/share/fonts/liberation/'
+# Liberation fonts: Arch/Fedora path first, then Debian/Ubuntu; LIBERATION_FONTS overrides.
+FONTS = next((d for d in (os.environ.get('LIBERATION_FONTS', ''), '/usr/share/fonts/liberation/',
+                          '/usr/share/fonts/truetype/liberation/')
+              if d and os.path.isfile(os.path.join(d, 'LiberationSans-Regular.ttf'))),
+             '/usr/share/fonts/liberation/')
+if not FONTS.endswith('/'):
+    FONTS += '/'
 BASIC = [(0x20, 0x7e), (0xa0, 0x17f), (0x400, 0x45f), (0x490, 0x491), (0x2010, 0x2027), (0x2030, 0x205e), (0x20a0, 0x20cf),
          (0x2116, 0x2116), (0x2122, 0x2122), (0xfffd, 0xfffd)]
 # Plain sans also covers IPA, Greek, Latin Extended-B and common symbols;
