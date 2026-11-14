@@ -35,7 +35,7 @@ static int stage_string(unsigned int address, int user, unsigned int *offset)
     for (;;) {
         if (staged.used == STRING_MAX) return -7; /* E2BIG */
         if (user && !linux_user_range(address, 1)) return -14;
-        char ch = *(const char *)address++;
+        char ch = *(const char *)(uintptr_t)address++;
         staged.strings[staged.used++] = ch;
         if (!ch) return 0;
     }
@@ -47,7 +47,7 @@ static int stage_vector(unsigned int address, unsigned int offset, unsigned int 
     for (;;) {
         if (!linux_user_range(address, 4)) return -14;
         unsigned int string;
-        memcpy(&string, (const void *)address, 4);
+        memcpy(&string, (const void *)(uintptr_t)address, 4);
         if (!string) return 0;
         if (*count == VECTOR_MAX) return -7;
         int error = stage_string(string, 1, &staged.offsets[offset + *count]);
@@ -61,27 +61,27 @@ static int stage_vector(unsigned int address, unsigned int offset, unsigned int 
 static unsigned int install_image(const void *image)
 {
     const ElfPlan *plan = &staged.plan;
-    unsigned int physical = (unsigned int)linux_memory_physical_base(plan->base);
+    unsigned int physical = (unsigned int)(uintptr_t)linux_memory_physical_base(plan->base);
     unsigned int arena_size = linux_memory_arena_size(plan->base);
     unsigned int delta = plan->base - physical;
     unsigned int sp = physical + arena_size;
-    memset((void *)physical, 0, arena_size);
+    memset((void *)(uintptr_t)physical, 0, arena_size);
     for (unsigned int i = 0; i < plan->count; i++) {
         const ElfSegment *s = &plan->segments[i];
-        memcpy((void *)(physical + s->address - plan->base),
+        memcpy((void *)(uintptr_t)(physical + s->address - plan->base),
                (const unsigned char *)image + s->offset, s->file_size);
     }
     sp -= staged.used;
-    memcpy((void *)sp, staged.strings, staged.used);
+    memcpy((void *)(uintptr_t)sp, staged.strings, staged.used);
     unsigned int strings = sp + delta;
     unsigned int path_size = strlen(staged.path) + 1;
     sp -= path_size;
-    memcpy((void *)sp, staged.path, path_size);
+    memcpy((void *)(uintptr_t)sp, staged.path, path_size);
     unsigned int execfn = sp + delta;
     unsigned int phdr = plan->phdr;
     if (!phdr) {
         sp = (sp - plan->phnum * 32) & ~3U;
-        memcpy((void *)sp, (const unsigned char *)image + plan->phoff, plan->phnum * 32);
+        memcpy((void *)(uintptr_t)sp, (const unsigned char *)image + plan->phoff, plan->phnum * 32);
         phdr = sp + delta;
     }
     unsigned int uid=permissions_uid();
@@ -91,7 +91,7 @@ static unsigned int install_image(const void *image)
     };
     unsigned int words = 1 + staged.argc + 1 + staged.envc + 1 + sizeof(auxv) / sizeof(auxv[0]);
     sp = (sp - words * 4) & ~15U;
-    unsigned int *stack = (unsigned int *)sp;
+    unsigned int *stack = (unsigned int *)(uintptr_t)sp;
     *stack++ = staged.argc;
     for (unsigned int i = 0; i < staged.argc; i++) *stack++ = strings + staged.offsets[i];
     *stack++ = 0;
@@ -120,11 +120,11 @@ int linux_run_image(const void *image, unsigned int size, int argc,
     staged.argc = argc; staged.envc = staged.used = 0; staged.path[0] = 0;
     for (int i = 0; i < argc; i++) {
         if (!argv[i]) return -22;
-        error = stage_string((unsigned int)argv[i], 0, &staged.offsets[i]);
+        error = stage_string((unsigned int)(uintptr_t)argv[i], 0, &staged.offsets[i]);
         if (error) return error;
     }
     /* GCC and other drivers need PATH when launching their child tools. */
-    error = stage_string((unsigned int)"PATH=/usr/bin:/bin", 0,
+    error = stage_string((unsigned int)(uintptr_t)"PATH=/usr/bin:/bin", 0,
                          &staged.offsets[VECTOR_MAX]);
     if (error) return error;
     staged.envc = 1;
@@ -230,7 +230,7 @@ int linux_execve(unsigned int path, unsigned int argv, unsigned int envp)
     for (unsigned int i = 0;; i++, path++) {
         if (i == sizeof(staged.path)) return -36;
         if (!linux_user_range(path, 1)) return -14;
-        staged.path[i] = *(const char *)path;
+        staged.path[i] = *(const char *)(uintptr_t)path;
         if (!staged.path[i]) break;
     }
     staged.used = 0;
@@ -240,7 +240,7 @@ int linux_execve(unsigned int path, unsigned int argv, unsigned int envp)
     if (error) return error;
     /* Linux supplies an empty argv[0] for an empty argument list. */
     if (!staged.argc) {
-        error = stage_string((unsigned int)"", 0, &staged.offsets[0]);
+        error = stage_string((unsigned int)(uintptr_t)"", 0, &staged.offsets[0]);
         if (error) return error;
         staged.argc = 1;
     }

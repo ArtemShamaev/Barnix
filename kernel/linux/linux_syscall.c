@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include "linux_abi.h"
 #include "linux_exec.h"
 #include "linux_task.h"
@@ -154,7 +155,7 @@ static int create_pipe(unsigned int address, unsigned int flags)
         files[fds[i]] = ends[i];
         descriptor_flags[fds[i]] = (flags & O_CLOEXEC) ? 1 : 0;
     }
-    memcpy((void *)address, fds, sizeof(fds));
+    memcpy((void *)(uintptr_t)address, fds, sizeof(fds));
     return 0;
 }
 int linux_io_ready(unsigned int slot)
@@ -196,7 +197,7 @@ int linux_io_resume(void)
         unsigned int chunk = vector->length - io->offset;
         if (chunk > available) chunk = available;
         if (chunk > PIPE_SIZE - position) chunk = PIPE_SIZE - position;
-        void *user = (void *)(vector->address + io->offset);
+        void *user = (void *)(uintptr_t)(vector->address + io->offset);
         if (io->writing) {
             memcpy(pipe->data + position, user, chunk);
             pipe->used += chunk;
@@ -228,7 +229,7 @@ static int pipe_transfer(unsigned int fd, unsigned int address, unsigned int cou
     if (vectored) {
         if (count > IOV_MAX) return -LINUX_EINVAL;
         if (count && !linux_user_range(address, count * sizeof(IoVector))) return -EFAULT;
-        if (count) memcpy(io->vectors, (const void *)address, count * sizeof(IoVector));
+        if (count) memcpy(io->vectors, (const void *)(uintptr_t)address, count * sizeof(IoVector));
     } else io->vectors[0] = (IoVector){address, count};
     for (unsigned int i = 0; i < io->count; i++) {
         IoVector *v = &io->vectors[i];
@@ -244,7 +245,7 @@ static int copy_path(char *out, unsigned int address)
 {
     for (unsigned int i = 0; i < PATH_SIZE; i++) {
         if (!linux_user_range(address, 1)) return -EFAULT;
-        out[i] = *(const char *)address++;
+        out[i] = *(const char *)(uintptr_t)address++;
         if (!out[i]) return i ? 0 : -ENOENT;
     }
     return -ENAMETOOLONG;
@@ -267,7 +268,7 @@ static int copy_stat64(unsigned int address, const FsFileInfo *info)
     stat.atime = info->atime;
     stat.mtime = info->mtime;
     stat.ctime = info->ctime;
-    memcpy((void *)address, &stat, sizeof(stat));
+    memcpy((void *)(uintptr_t)address, &stat, sizeof(stat));
     return 0;
 }
 static int transfer(unsigned int fd, unsigned int address, unsigned int count, int writing)
@@ -279,7 +280,7 @@ static int transfer(unsigned int fd, unsigned int address, unsigned int count, i
     if (file->pipe) return pipe_transfer(fd, address, count, writing, 0);
     if (!count) return 0;
     if (!linux_user_range(address, count)) return -EFAULT;
-    unsigned char *data = (unsigned char *)address;
+    unsigned char *data = (unsigned char *)(uintptr_t)address;
     if (file->terminal) {
         if (!writing) {
             /* A terminal reads whole lines, shown as they are typed
@@ -339,7 +340,7 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
         int mapped = linux_memory_map(b, 3);
         if ((unsigned int)mapped >= 0xfffff000U) return mapped;
         if (file) {
-            int got = fs_read(file->name, page_offset * 4096U, (void *)(unsigned int)mapped, b);
+            int got = fs_read(file->name, page_offset * 4096U, (void *)(uintptr_t)(unsigned int)mapped, b);
             if (got < 0) { linux_memory_unmap((unsigned int)mapped, b); return -EIO; }
         }
         if (!(c & 2U)) linux_memory_protect((unsigned int)mapped, b, c | 1U);
@@ -354,10 +355,10 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
         unsigned int nsec = tick % 1000 * 1000000U;
         if (frame->eax == 403) {
             unsigned int result[4] = {sec, 0, nsec, 0};
-            memcpy((void *)b, result, sizeof(result));
+            memcpy((void *)(uintptr_t)b, result, sizeof(result));
         } else {
             unsigned int result[2] = {sec, nsec};
-            memcpy((void *)b, result, sizeof(result));
+            memcpy((void *)(uintptr_t)b, result, sizeof(result));
         }
         return 0;
     }
@@ -365,18 +366,18 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
         if (a) {
             if (!linux_user_range(a, 8)) return -EFAULT;
             unsigned int result[2] = {1790000000U + clock_calls / 1000, clock_calls % 1000 * 1000U};
-            memcpy((void *)a, result, sizeof(result));
+            memcpy((void *)(uintptr_t)a, result, sizeof(result));
             clock_calls++;
         }
-        if (b) { if (!linux_user_range(b, 8)) return -EFAULT; memset((void *)b, 0, 8); }
+        if (b) { if (!linux_user_range(b, 8)) return -EFAULT; memset((void *)(uintptr_t)b, 0, 8); }
         return 0;
     }
     case __NR_nanosleep: {
         if (!linux_user_range(a, 8)) return -EFAULT;
-        const unsigned int *request = (const unsigned int *)a;
+        const unsigned int *request = (const unsigned int *)(uintptr_t)a;
         if (request[1] >= 1000000000U) return -LINUX_EINVAL;
         clock_calls += request[0] * 1000U + request[1] / 1000000U + 1U;
-        if (b) { if (!linux_user_range(b, 8)) return -EFAULT; memset((void *)b, 0, 8); }
+        if (b) { if (!linux_user_range(b, 8)) return -EFAULT; memset((void *)(uintptr_t)b, 0, 8); }
         return 0;
     }
     case 240:
@@ -391,12 +392,12 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
         if (a == 0 || a > 64 || frame->esi != 8) return -LINUX_EINVAL;
         if (c) {
             if (!linux_user_range(c, 20)) return -EFAULT;
-            memcpy((void *)c, signal_actions[file_task][a], 20);
+            memcpy((void *)(uintptr_t)c, signal_actions[file_task][a], 20);
         }
         if (b) {
             if (!linux_user_range(b, 20)) return -EFAULT;
             if (a == 9 || a == 19) return -LINUX_EINVAL;
-            memcpy(signal_actions[file_task][a], (const void *)b, 20);
+            memcpy(signal_actions[file_task][a], (const void *)(uintptr_t)b, 20);
         }
         return 0;
     }
@@ -404,12 +405,12 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
         if (frame->esi != 8) return -LINUX_EINVAL;
         if (c) {
             if (!linux_user_range(c, 8)) return -EFAULT;
-            memcpy((void *)c, signal_masks[file_task], 8);
+            memcpy((void *)(uintptr_t)c, signal_masks[file_task], 8);
         }
         if (b) {
             if (!linux_user_range(b, 8)) return -EFAULT;
             if (a > 2) return -LINUX_EINVAL;
-            const unsigned char *set = (const unsigned char *)b;
+            const unsigned char *set = (const unsigned char *)(uintptr_t)b;
             for (unsigned int i = 0; i < 8; i++) {
                 if (a == 0) signal_masks[file_task][i] |= set[i];
                 else if (a == 1) signal_masks[file_task][i] &= ~set[i];
@@ -579,12 +580,12 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
         int size = fs_file_size(file->name);
         if (size < 0) return -EIO;
         long long offset = (long long)(int)b * 0x100000000LL + c;
-        long long base = frame->edi == 2 ? size : frame->edi == 1 ? file->position : 0;
+        long long base = frame->edi == 2 ? (unsigned int)size : frame->edi == 1 ? file->position : 0U;
         long long position = base + offset;
         if (position < 0 || position > 0x7fffffffLL) return -LINUX_EINVAL;
         file->position = (unsigned int)position;
         unsigned long long result = (unsigned long long)position;
-        memcpy((void *)frame->esi, &result, sizeof(result));
+        memcpy((void *)(uintptr_t)frame->esi, &result, sizeof(result));
         return 0;
     }
     case LINUX_SYS_stat64:
@@ -600,7 +601,7 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
         if (a != (unsigned int)-100 && a >= FD_COUNT) return -LINUX_EBADF;
         char path[PATH_SIZE]; FsFileInfo info;
         if (!linux_user_range(b, 1)) return -EFAULT;
-        if (!*(const char *)b && (frame->esi & 0x1000U)) {
+        if (!*(const char *)(uintptr_t)b && (frame->esi & 0x1000U)) {
             OpenFile *file = get_file(a);
             if (!file) return -LINUX_EBADF;
             if (file->terminal || file->pipe) {   /* fstat() of glibc: as fstat64 */
@@ -637,7 +638,7 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
         if (!file) return -LINUX_EBADF;
         if (!file->directory) return -20;
         if (!linux_user_range(b, c)) return -EFAULT;
-        return fs_getdents(file->name, (void *)b, c, &file->position);
+        return fs_getdents(file->name, (void *)(uintptr_t)b, c, &file->position);
     }
     case 220: { /* getdents64: the getdents records, widened (opendir in modern glibc) */
         OpenFile *file = get_file(a);
@@ -658,7 +659,7 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
                 unsigned int length = r[8] | r[9] << 8, name = (unsigned int)strlen((const char *)r + 10);
                 unsigned int need = (19 + name + 1 + 7) & ~7U;
                 if (out + need > c) return out ? (int)out : -LINUX_EINVAL;
-                unsigned char *d = (unsigned char *)b + out;
+                unsigned char *d = (unsigned char *)(uintptr_t)b + out;
                 memset(d, 0, (int)need);
                 memcpy(d, &ino, 4); memcpy(d + 8, &next, 4);
                 d[16] = (unsigned char)need; d[17] = (unsigned char)(need >> 8); d[18] = length ? r[length - 1] : 0;
@@ -673,7 +674,7 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
     case 383: case 386: return -LINUX_ENOSYS;   /* statx, rseq: glibc falls back quietly */
     case 355: /* getrandom */
         if (!linux_user_range(a, b)) return -EFAULT;
-        net_random((void *)a, b);
+        net_random((void *)(uintptr_t)a, b);
         return (int)b;
     case 39:
     case 296: { /* mkdir, mkdirat */
@@ -700,35 +701,35 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
     case 76:
     case 191: /* getrlimit, ugetrlimit: no limits */
         if (!linux_user_range(b, 8)) return -EFAULT;
-        memset((void *)b, 0xff, 8);
+        memset((void *)(uintptr_t)b, 0xff, 8);
         return 0;
     case 340: /* prlimit64 (pid, resource, new, old) */
-        if (frame->esi) { if (!linux_user_range(frame->esi, 16)) return -EFAULT; memset((void *)frame->esi, 0xff, 16); }
+        if (frame->esi) { if (!linux_user_range(frame->esi, 16)) return -EFAULT; memset((void *)(uintptr_t)frame->esi, 0xff, 16); }
         return 0;
     case 242: /* sched_getaffinity: one processor */
         if (b < 4 || !linux_user_range(c, b < 128 ? b : 128)) return -LINUX_EINVAL;
-        memset((void *)c, 0, (int)(b < 128 ? b : 128)); *(unsigned char *)c = 1;
+        memset((void *)(uintptr_t)c, 0, (int)(b < 128 ? b : 128)); *(unsigned char *)(uintptr_t)c = 1;
         return 4;
     case 186: /* sigaltstack: none */
-        if (b) { if (!linux_user_range(b, 12)) return -EFAULT; memset((void *)b, 0, 12); ((unsigned int *)b)[1] = 2; }
+        if (b) { if (!linux_user_range(b, 12)) return -EFAULT; memset((void *)(uintptr_t)b, 0, 12); ((unsigned int *)(uintptr_t)b)[1] = 2; }
         return 0;
     case 77: /* getrusage */
         if (!linux_user_range(b, 72)) return -EFAULT;
-        memset((void *)b, 0, 72);
+        memset((void *)(uintptr_t)b, 0, 72);
         return 0;
     case 266:
     case 406: /* clock_getres, clock_getres_time64: a microsecond */
         if (b) {
             unsigned int words = frame->eax == 406 ? 4 : 2;
             if (!linux_user_range(b, words * 4)) return -EFAULT;
-            memset((void *)b, 0, (int)words * 4);
-            ((unsigned int *)b)[words == 4 ? 2 : 1] = 1000;
+            memset((void *)(uintptr_t)b, 0, (int)words * 4);
+            ((unsigned int *)(uintptr_t)b)[words == 4 ? 2 : 1] = 1000;
         }
         return 0;
     case LINUX_SYS_getcwd:
         if (!b) return -LINUX_EINVAL;
         if (!linux_user_range(a, b)) return -EFAULT;
-        return fs_getcwd((char *)a, b);
+        return fs_getcwd((char *)(uintptr_t)a, b);
     case LINUX_SYS_chdir: {
         char path[PATH_SIZE]; int error = copy_path(path, a);
         return error ? error : fs_cd(path) ? -ENOENT : 0;
@@ -745,34 +746,34 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
         if (!file) return -LINUX_EBADF;
         if (file->pipe && b == 0x541b) { /* FIONREAD */
             if (!linux_user_range(c, 4)) return -EFAULT;
-            memcpy((void *)c, &file->pipe->used, 4);
+            memcpy((void *)(uintptr_t)c, &file->pipe->used, 4);
             return 0;
         }
         if (file->terminal) {   /* the console: isatty() and a line-editing tty */
             if (b == 0x5401 || b == 0x802c542aU) {   /* TCGETS, TCGETS2 (newer glibc): canonical mode with echo */
                 unsigned int size = b == 0x5401 ? 36 : 44;
                 if (!linux_user_range(c, size)) return -EFAULT;
-                unsigned int *t = (unsigned int *)c;
+                unsigned int *t = (unsigned int *)(uintptr_t)c;
                 memset(t, 0, (int)size);
                 if (size == 44) { t[9] = 38400; t[10] = 38400; }   /* c_ispeed, c_ospeed */
                 t[0] = 0x100;          /* ICRNL */
                 t[1] = 0x5;            /* OPOST | ONLCR */
                 t[2] = 0xbf;           /* B38400 | CS8 | CREAD */
                 t[3] = 0x8a3b;         /* ISIG | ICANON | ECHO | ECHOE | ECHOK | ECHOCTL | ECHOKE | IEXTEN */
-                unsigned char *cc = (unsigned char *)c + 17;
+                unsigned char *cc = (unsigned char *)(uintptr_t)c + 17;
                 cc[0] = 3; cc[1] = 28; cc[2] = 127; cc[3] = 21; cc[4] = 4; cc[6] = 1;   /* ^C ^\ DEL ^U ^D, VMIN 1 */
                 return 0;
             }
             if ((b >= 0x5402 && b <= 0x5404) || (b >= 0x402c542bU && b <= 0x402c542dU)) return 0;   /* TCSETS*, TCSETS2*: the console keeps its mode */
             if (b == 0x5413) {   /* TIOCGWINSZ */
                 if (!linux_user_range(c, 8)) return -EFAULT;
-                unsigned short *size = (unsigned short *)c;
+                unsigned short *size = (unsigned short *)(uintptr_t)c;
                 size[0] = 25; size[1] = 80; size[2] = 640; size[3] = 400;
                 return 0;
             }
             if (b == 0x540f) {   /* TIOCGPGRP */
                 if (!linux_user_range(c, 4)) return -EFAULT;
-                *(int *)c = 1; return 0;
+                *(int *)(uintptr_t)c = 1; return 0;
             }
             {   /* others are noted on the debug console, as missing system calls */
                 char note[] = "[linux: tty ioctl 00000000 is missing]\n";
@@ -784,7 +785,7 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
     }
     case LINUX_SYS_uname: {
         if (!linux_user_range(a, 6 * 65)) return -EFAULT;
-        char *out = (char *)a;
+        char *out = (char *)(uintptr_t)a;
         const char *values[6] = {"Barnix", "barnix", "0.1", "Linux ABI experimental", "i686", ""};
         memset(out, 0, 6 * 65);
         for (int i = 0; i < 6; i++) strcpy(out + i * 65, values[i]);
@@ -798,7 +799,7 @@ int linux_syscall_dispatch(LinuxSyscallFrame *frame)
         if (c > 1024) return -LINUX_EINVAL;
         if (!c) return 0;
         if (!linux_user_range(b, c * 8)) return -EFAULT;
-        const unsigned int *iov = (const unsigned int *)b;
+        const unsigned int *iov = (const unsigned int *)(uintptr_t)b;
         unsigned int sum = 0;
         for (unsigned int i = 0; i < c; i++) {
             if (iov[i * 2 + 1] > 0x7fffffffU - sum) return -LINUX_EINVAL;

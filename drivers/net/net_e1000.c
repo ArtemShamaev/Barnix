@@ -28,7 +28,7 @@ static int send(const void *frame, unsigned int length)
     if (!(d->status & 1)) return -1;
     memcpy(tx_buffer[tx_next], frame, length);
     if (length < 60) { memset(tx_buffer[tx_next] + length, 0, 60 - length); length = 60; }
-    d->address = (unsigned int)tx_buffer[tx_next]; d->high = 0;
+    d->address = (unsigned int)(uintptr_t)tx_buffer[tx_next]; d->high = 0;
     d->length = (unsigned short)length; d->cso = 0; d->css = 0; d->special = 0;
     d->command = 0x01 | 0x02 | 0x08;   /* end of packet, insert FCS, report status */
     d->status = 0;
@@ -81,7 +81,7 @@ int e1000_probe(unsigned int pci, unsigned int id, NetDriver *driver)
     unsigned int bar = storage_pci_mmio_bar(pci & 0x00ffff00U, 0);
     if (!bar || linux_memory_map_mmio(bar, 0x20000)) return -1;
     net_pci_write(pci, 4, (net_pci_read(pci, 4) & 0xffff) | 6);   /* memory, bus master */
-    base = (volatile unsigned char *)bar;
+    base = (volatile unsigned char *)(uintptr_t)bar;
     w32(0xd8, 0xffffffffU);                           /* no interrupts */
     w32(0x00, r32(0x00) | (1U << 26));                /* reset */
     net_delay_ms(20);
@@ -96,11 +96,11 @@ int e1000_probe(unsigned int pci, unsigned int id, NetDriver *driver)
     }
     for (int i = 0; i < 6; i++) driver->mac[i] = (unsigned char)((i < 4 ? low >> (8 * i) : high >> (8 * (i - 4))) & 255);
     for (unsigned int i = 0; i < 128; i++) w32(0x5200 + 4 * i, 0);
-    for (int i = 0; i < RX_COUNT; i++) { memset(&rx[i], 0, sizeof(Rx)); rx[i].address = (unsigned int)rx_buffer[i]; }
+    for (int i = 0; i < RX_COUNT; i++) { memset(&rx[i], 0, sizeof(Rx)); rx[i].address = (unsigned int)(uintptr_t)rx_buffer[i]; }
     for (int i = 0; i < TX_COUNT; i++) { memset(&tx[i], 0, sizeof(Tx)); tx[i].status = 1; }
-    w32(0x2800, (unsigned int)rx); w32(0x2804, 0); w32(0x2808, sizeof(rx));
+    w32(0x2800, (unsigned int)(uintptr_t)rx); w32(0x2804, 0); w32(0x2808, sizeof(rx));
     w32(0x2810, 0); w32(0x2818, RX_COUNT - 1);
-    w32(0x3800, (unsigned int)tx); w32(0x3804, 0); w32(0x3808, sizeof(tx));
+    w32(0x3800, (unsigned int)(uintptr_t)tx); w32(0x3804, 0); w32(0x3808, sizeof(tx));
     w32(0x3810, 0); w32(0x3818, 0);
     rx_next = tx_next = 0;
     w32(0x100, (1U << 1) | (1U << 15) | (1U << 26));                 /* receive: broadcast, strip CRC, 2 KiB */

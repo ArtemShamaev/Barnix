@@ -39,7 +39,7 @@ static void flush(const void *start, unsigned int bytes)
 {
     if (!bytes) return;
     if (!has_clflush) { __asm__ volatile("wbinvd" ::: "memory"); return; }
-    for (unsigned int p = (unsigned int)start & ~63U, end = (unsigned int)start + bytes; p < end; p += 64)
+    for (unsigned int p = (unsigned int)(uintptr_t)start & ~63U, end = (unsigned int)(uintptr_t)start + bytes; p < end; p += 64)
         __asm__ volatile("clflush (%0)" :: "r"(p) : "memory");
     __asm__ volatile("mfence" ::: "memory");
 }
@@ -242,7 +242,7 @@ static int hda_start(unsigned int pci, unsigned int bar)
     /* Sounds (key clicks) also play inside Linux system calls, under their
      * page tables: the registers must be mapped there too. */
     if (linux_memory_map_mmio(bar, 0x4000)) return 0;
-    hda = (volatile unsigned char *)bar;
+    hda = (volatile unsigned char *)(uintptr_t)bar;
     pci_write(pci, 4, (pci_read(pci, 4) & 0xffff) | 6);   /* memory, bus master */
     /* As Linux does: traffic class 0 (TCSEL), and snooped DMA where the
      * chipset makes it optional (Intel PCH DEVC, ATI/AMD, NVIDIA). */
@@ -280,8 +280,8 @@ static int hda_start(unsigned int pci, unsigned int bar)
     R8(0x5e) = (unsigned char)((size & 0xfc) | (rirb_entries == 256 ? 2 : rirb_entries == 16 ? 1 : 0));
     memset((void *)corb, 0, 4096);
     flush((const void *)corb, 4096);
-    R32(0x40) = (unsigned int)corb; R32(0x44) = 0;
-    R32(0x50) = (unsigned int)rirb; R32(0x54) = 0;
+    R32(0x40) = (unsigned int)(uintptr_t)corb; R32(0x44) = 0;
+    R32(0x50) = (unsigned int)(uintptr_t)rirb; R32(0x54) = 0;
     R16(0x4a) = 0x8000;                                   /* CORB read pointer reset */
     for (int i = 0; i < 1000 && !(R16(0x4a) & 0x8000); i++) __asm__ volatile("pause");
     R16(0x4a) = 0;
@@ -309,7 +309,7 @@ static int hda_start(unsigned int pci, unsigned int bar)
     wait_bits8(stream, 1, 0);
     unsigned int part = RING_FRAMES * 4 / 4;
     for (int i = 0; i < 4; i++) {
-        bdl[i * 4] = (unsigned int)ring + i * part; bdl[i * 4 + 1] = 0;
+        bdl[i * 4] = (unsigned int)(uintptr_t)ring + i * part; bdl[i * 4 + 1] = 0;
         bdl[i * 4 + 2] = part; bdl[i * 4 + 3] = 0;
     }
     flush(bdl, 64);
@@ -318,7 +318,7 @@ static int hda_start(unsigned int pci, unsigned int bar)
     *(volatile unsigned int *)(stream + 0x08) = RING_FRAMES * 4;   /* cyclic buffer length */
     *(volatile unsigned short *)(stream + 0x0c) = 3;               /* last valid entry */
     *(volatile unsigned short *)(stream + 0x12) = 0x0011;
-    *(volatile unsigned int *)(stream + 0x18) = (unsigned int)bdl;
+    *(volatile unsigned int *)(stream + 0x18) = (unsigned int)(uintptr_t)bdl;
     *(volatile unsigned int *)(stream + 0x1c) = 0;
     stream[2] = 0x10;                                     /* stream tag 1 */
     stream[3] = 0x1c;                                     /* clear status */
@@ -356,10 +356,10 @@ static int ac97_start(unsigned int pci)
     for (int i = 0; i < 100 && (in8(bus_io + 0x1b) & 2); i++) usb_delay_ms(1);
     unsigned int samples = RING_FRAMES * 2 / AC97_ENTRIES;
     for (int i = 0; i < AC97_ENTRIES; i++) {
-        bdl[i * 2] = (unsigned int)ring + i * samples * 2;
+        bdl[i * 2] = (unsigned int)(uintptr_t)ring + i * samples * 2;
         bdl[i * 2 + 1] = samples;
     }
-    out32(bus_io + 0x10, (unsigned int)bdl);
+    out32(bus_io + 0x10, (unsigned int)(uintptr_t)bdl);
     out8(bus_io + 0x15, AC97_ENTRIES - 1);
     out16(bus_io + 0x16, 0x1c);
     out8(bus_io + 0x1b, 1);                               /* run */

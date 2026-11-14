@@ -23,7 +23,7 @@ static void reserve(unsigned int start, unsigned int bytes)
 static unsigned int string_bytes(unsigned int address)
 {
     if (!address) return 0;
-    const char *s = (const char *)address;
+    const char *s = (const char *)(uintptr_t)address;
     unsigned int n = 0;
     while (n < 4096 && s[n]) n++;
     return n + 1;
@@ -48,7 +48,7 @@ static void consider(unsigned int start, unsigned int end)
 void memory_init(const MultibootInfo *info)
 {
     if (!info) return;
-    reserve((unsigned int)info, sizeof(*info));
+    reserve((unsigned int)(uintptr_t)info, sizeof(*info));
     if (info->flags & MULTIBOOT_CMDLINE) reserve(info->command_line, string_bytes(info->command_line));
     /* Tables GRUB may leave in low memory; kept away from memory_low_free. */
     if (info->flags & (1U << 7)) reserve(info->drives_addr, info->drives_length);
@@ -57,7 +57,7 @@ void memory_init(const MultibootInfo *info)
     if (info->flags & (1U << 10)) reserve(info->apm_table, 64);
     if (info->flags & (1U << 11)) { reserve(info->vbe_control_info, 512); reserve(info->vbe_mode_info, 256); }
     if ((info->flags & MULTIBOOT_MODULES) && info->module_count <= 32) {
-        const MultibootModule *module = (const MultibootModule *)info->modules;
+        const MultibootModule *module = (const MultibootModule *)(uintptr_t)info->modules;
         reserve(info->modules, info->module_count * sizeof(*module));
         for (unsigned int i = 0; i < info->module_count; i++) {
             if (module[i].end > module[i].start) reserve(module[i].start, module[i].end - module[i].start);
@@ -67,7 +67,7 @@ void memory_init(const MultibootInfo *info)
     if ((info->flags & (1U << 6)) && info->mmap_addr && info->mmap_length <= 65536) {
         reserve(info->mmap_addr, info->mmap_length);
         for (unsigned int off = 0; off + 24 <= info->mmap_length;) {
-            const unsigned int *record = (const unsigned int *)(info->mmap_addr + off);
+            const unsigned int *record = (const unsigned int *)(uintptr_t)(info->mmap_addr + off);
             if (record[0] < 20 || record[0] > info->mmap_length - off - 4) break;
             unsigned long long base = record[1] | (unsigned long long)record[2] << 32;
             unsigned long long size = record[3] | (unsigned long long)record[4] << 32;
@@ -106,7 +106,7 @@ void *memory_kernel_alloc(unsigned int bytes)
     bytes = (bytes + 4095U) & ~4095U;
     unsigned int end = app_floor ? app_floor : region_end;
     if (!kernel_top || kernel_top > end || bytes > end - kernel_top) return 0;
-    void *block = (void *)kernel_top;
+    void *block = (void *)(uintptr_t)kernel_top;
     kernel_top += bytes;
     return block;
 }
@@ -115,8 +115,8 @@ void *memory_kernel_alloc(unsigned int bytes)
 int memory_kernel_free(void *block, unsigned int bytes)
 {
     bytes = (bytes + 4095U) & ~4095U;
-    if (!block || (unsigned int)block + bytes != kernel_top) return -1;
-    kernel_top = (unsigned int)block;
+    if (!block || (unsigned int)(uintptr_t)block + bytes != kernel_top) return -1;
+    kernel_top = (unsigned int)(uintptr_t)block;
     return 0;
 }
 
@@ -160,8 +160,8 @@ void *memory_app_keep(unsigned int *bytes, unsigned int keep)
     if (!*bytes) return 0;
     app_floor = nested_base = kernel_top + keep;
     nested_bytes = reserved;
-    memset((void *)(app_floor + reserved), 0, *bytes);
-    return (void *)(app_floor + reserved);
+    memset((void *)(uintptr_t)(app_floor + reserved), 0, *bytes);
+    return (void *)(uintptr_t)(app_floor + reserved);
 }
 void *memory_app(unsigned int *bytes) { return memory_app_keep(bytes, 0); }
 void memory_app_release(void) { app_floor = nested_base = nested_bytes = 0; }
@@ -172,6 +172,6 @@ void *memory_nested(unsigned int *bytes)
     unsigned int reserved = nested_base ? nested_bytes : nested_reserve(memory_available());
     if (!bytes || !reserved) return 0;
     if (*bytes > reserved || !*bytes) *bytes = reserved;
-    memset((void *)base, 0, *bytes);
-    return (void *)base;
+    memset((void *)(uintptr_t)base, 0, *bytes);
+    return (void *)(uintptr_t)base;
 }

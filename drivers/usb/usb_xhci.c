@@ -133,7 +133,7 @@ static uint32_t enqueue(Ring *r, uint32_t a, uint32_t b, uint32_t c,
                         uint32_t control) {
   if (r->next == RING_SIZE - 1) {
     Trb *link = &r->trbs[r->next];
-    link->a = (uint32_t)r->trbs;
+    link->a = (uint32_t)(uintptr_t)r->trbs;
     link->b = link->c = 0;
     barrier();
     link->d = TRB_TYPE(6) | 2 | r->cycle;
@@ -146,7 +146,7 @@ static uint32_t enqueue(Ring *r, uint32_t a, uint32_t b, uint32_t c,
   t->c = c;
   barrier();
   t->d = control | r->cycle;
-  return (uint32_t)t;
+  return (uint32_t)(uintptr_t)t;
 }
 static void events(void) {
   for (unsigned int count = 0; count < EVENTS; count++) {
@@ -197,7 +197,7 @@ static void events(void) {
       host->event_index = 0;
       host->event_cycle ^= 1;
     }
-    write64(host->intr + 6, (uint32_t)&host->events[host->event_index] | 8);
+    write64(host->intr + 6, (uint32_t)(uintptr_t)&host->events[host->event_index] | 8);
   }
 }
 static void stop_host(void) {
@@ -242,7 +242,7 @@ static int control(unsigned int slot, unsigned int type, unsigned int request,
   unsigned int trt = length ? (type & 128 ? 3 : 2) : 0;
   enqueue(&v->control, a, b, 8, TRB_TYPE(2) | (1U << 6) | (trt << 16));
   if (length)
-    enqueue(&v->control, (uint32_t)control_dma, 0, length,
+    enqueue(&v->control, (uint32_t)(uintptr_t)control_dma, 0, length,
             TRB_TYPE(3) | (1U << 2) | ((type & 128) ? 1U << 16 : 0));
   v->control_status = enqueue(&v->control, 0, 0, 0,
                               TRB_TYPE(4) | (1U << 5) |
@@ -283,7 +283,7 @@ static int recover_endpoint(unsigned int slot, unsigned int dci, Ring *ring) {
   if (!host->ready)
     return -1;
   ring_init(ring);
-  if (command(16, (uint32_t)ring->trbs | 1, slot | (dci << 8)) < 0) {
+  if (command(16, (uint32_t)(uintptr_t)ring->trbs | 1, slot | (dci << 8)) < 0) {
     stop_host();
     return -1;
   }
@@ -381,7 +381,7 @@ static int recover_mouse(unsigned int slot) {
     return 1;
   command(14, 0, slot | (v->dci << 8));   /* Reset Endpoint: Halted -> Stopped */
   ring_init(&v->interrupt);
-  command(16, (uint32_t)v->interrupt.trbs | 1, slot | (v->dci << 8));   /* Set TR Dequeue */
+  command(16, (uint32_t)(uintptr_t)v->interrupt.trbs | 1, slot | (v->dci << 8));   /* Set TR Dequeue */
   if (code == 6)   /* Stall: CLEAR_FEATURE(ENDPOINT_HALT) */
     control(slot, 0x02, 1, 0, 0x80 | (v->dci - 1) / 2, 0, 0);
   return 1;
@@ -421,9 +421,9 @@ static int setup_mouse(unsigned int slot, unsigned int iface,
   ep[0] = (exponent > 15 ? 15 : exponent) << 16;
   ep[1] = (3U << 1) | (7U << 3) | (packet << 16);
   ring_init(&v->interrupt);
-  ep[2] = (uint32_t)v->interrupt.trbs | 1;
+  ep[2] = (uint32_t)(uintptr_t)v->interrupt.trbs | 1;
   ep[4] = packet | (packet << 16);
-  if (command(12, (uint32_t)v->input, slot) < 0)
+  if (command(12, (uint32_t)(uintptr_t)v->input, slot) < 0)
     return -1;
   v->mouse = 1;
   v->pending = 0;
@@ -450,7 +450,7 @@ static int configure(unsigned int slot) {
   ((uint32_t *)v->input)[1] = 2;
   memcpy(input_ep(v, 1), v->output + host->context_size, host->context_size);
   input_ep(v, 1)[1] = (input_ep(v, 1)[1] & 0xffff) | (packet << 16);
-  if (command(13, (uint32_t)v->input, slot) < 0)
+  if (command(13, (uint32_t)(uintptr_t)v->input, slot) < 0)
     return -1;
   if (control(slot, 0x80, 6, 0x100, 0, descriptor, 18))
     return -1;
@@ -537,7 +537,7 @@ static int configure(unsigned int slot) {
         ((uint32_t *)v->input)[1] = 1;
         slot_context(v, 1);
         input_slot(v)[2] |= ((descriptor[3] >> 5) & 3) << 16;
-        if (command(13, (uint32_t)v->input, slot) < 0)
+        if (command(13, (uint32_t)(uintptr_t)v->input, slot) < 0)
           return -1;
         if (v->speed >= 4)
           control(slot, 0x20, 12, v->depth, 0, 0, 0);
@@ -570,7 +570,7 @@ static int attach(unsigned int port, unsigned int parent,
     v->depth = p->depth + 1;
     v->route = p->route | (parent_port << (p->depth * 4));
   }
-  host->dcbaa[slot] = (uint32_t)v->output;
+  host->dcbaa[slot] = (uint32_t)(uintptr_t)v->output;
   ((uint32_t *)v->input)[1] = 3;
   slot_context(v, 1);
   ring_init(&v->control);
@@ -580,9 +580,9 @@ static int attach(unsigned int port, unsigned int parent,
             : speed == 3 ? 64U
                          : 8U)
            << 16);
-  ep[2] = (uint32_t)v->control.trbs | 1;
+  ep[2] = (uint32_t)(uintptr_t)v->control.trbs | 1;
   ep[4] = 8;
-  if (command(11, (uint32_t)v->input, slot) < 0 || configure(slot)) {
+  if (command(11, (uint32_t)(uintptr_t)v->input, slot) < 0 || configure(slot)) {
     disconnect(slot);
     return -1;
   }
@@ -646,7 +646,7 @@ static void scan_hub(unsigned int slot) {
 static int initialize(unsigned int base, unsigned int index) {
   if (base > 0xffff0000U || linux_memory_map_mmio(base, 65536))
     return -1;
-  volatile uint32_t *cap = (volatile uint32_t *)base;
+  volatile uint32_t *cap = (volatile uint32_t *)(uintptr_t)base;
   unsigned int caplength = cap[0] & 255, hcs = cap[1], hcc = cap[4],
                rt = cap[6] & ~31U, db = cap[5] & ~3U;
   if (caplength < 32 || rt > 0xf000 || db > 0xf000)
@@ -658,9 +658,9 @@ static int initialize(unsigned int base, unsigned int index) {
   host->ports = hcs >> 24;
   if (host->ports > 32)
     host->ports = 32;
-  host->op = (volatile uint32_t *)(base + caplength);
-  host->doorbell = (volatile uint32_t *)(base + db);
-  host->intr = (volatile uint32_t *)(base + rt + 0x20);
+  host->op = (volatile uint32_t *)(uintptr_t)(base + caplength);
+  host->doorbell = (volatile uint32_t *)(uintptr_t)(base + db);
+  host->intr = (volatile uint32_t *)(uintptr_t)(base + rt + 0x20);
   unsigned int ext = hcc >> 16;
   for (unsigned int i = 0; ext && i < 64; i++) {
     if (ext > 16380)
@@ -701,19 +701,19 @@ static int initialize(unsigned int base, unsigned int index) {
   if (scratch > 32)
     return -1;
   for (unsigned int i = 0; i < scratch; i++)
-    host->scratch_addresses[i] = (uint32_t)host->scratch[i];
+    host->scratch_addresses[i] = (uint32_t)(uintptr_t)host->scratch[i];
   if (scratch)
-    host->dcbaa[0] = (uint32_t)host->scratch_addresses;
+    host->dcbaa[0] = (uint32_t)(uintptr_t)host->scratch_addresses;
   ring_init(&host->commands);
   host->event_cycle = 1;
-  host->erst[0] = (uint32_t)host->events;
+  host->erst[0] = (uint32_t)(uintptr_t)host->events;
   host->erst[2] = EVENTS;
-  write64(host->op + 12, (uint32_t)host->dcbaa);
-  write64(host->op + 6, (uint32_t)host->commands.trbs | 1);
+  write64(host->op + 12, (uint32_t)(uintptr_t)host->dcbaa);
+  write64(host->op + 6, (uint32_t)(uintptr_t)host->commands.trbs | 1);
   host->intr[0] = 0;
   host->intr[2] = 1;
-  write64(host->intr + 4, (uint32_t)host->erst);
-  write64(host->intr + 6, (uint32_t)host->events);
+  write64(host->intr + 4, (uint32_t)(uintptr_t)host->erst);
+  write64(host->intr + 6, (uint32_t)(uintptr_t)host->events);
   host->op[14] = (hcs & 255) > SLOTS ? SLOTS : (hcs & 255);
   barrier();
   host->op[0] = 1;
@@ -818,7 +818,7 @@ static int poll(int maintain) {
                        (signed char)v->report[2], v->report[0] & 7, 0, 0);
         v->bytes = 0;
       }
-      enqueue(&v->interrupt, (uint32_t)v->report, 0, v->packet,
+      enqueue(&v->interrupt, (uint32_t)(uintptr_t)v->report, 0, v->packet,
               TRB_TYPE(1) | (1U << 5) | (1U << 2));
       v->pending = 1;
       barrier();
@@ -846,7 +846,7 @@ static int bulk(unsigned int slot, int input, void *data, unsigned int length) {
   v->bulk_length = length;
   v->bulk_done = 0;
   v->bulk_result = -1;
-  enqueue(r, (uint32_t)bulk_dma, 0, length,
+  enqueue(r, (uint32_t)(uintptr_t)bulk_dma, 0, length,
           TRB_TYPE(1) | (1U << 5) | (1U << 2));
   barrier();
   host->doorbell[slot] = dci;
@@ -912,13 +912,13 @@ static int setup_storage(unsigned int slot, unsigned int iface) {
   ring_init(&v->bulk_out);
   uint32_t *ep = input_ep(v, in);
   ep[1] = (3U << 1) | (6U << 3) | (v->bulk_in_packet << 16);
-  ep[2] = (uint32_t)v->bulk_in.trbs | 1;
+  ep[2] = (uint32_t)(uintptr_t)v->bulk_in.trbs | 1;
   ep[4] = 512;
   ep = input_ep(v, out);
   ep[1] = (3U << 1) | (2U << 3) | (v->bulk_out_packet << 16);
-  ep[2] = (uint32_t)v->bulk_out.trbs | 1;
+  ep[2] = (uint32_t)(uintptr_t)v->bulk_out.trbs | 1;
   ep[4] = 512;
-  if (command(12, (uint32_t)v->input, slot) < 0 ||
+  if (command(12, (uint32_t)(uintptr_t)v->input, slot) < 0 ||
       control(slot, 0x21, 0xff, 0, iface, 0, 0))
     return -1;
   Storage next = {.host = host->index, .slot = slot};

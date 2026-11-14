@@ -198,7 +198,7 @@ static int run_once(const char *name, int argc, const char *const *argv, int *st
     for (unsigned int i = 0; i < plan.count; i++)
     {
         ElfSegment *s = &plan.segments[i];
-        memcpy((void *)s->address, executable + s->offset, s->file_size);
+        memcpy((void *)(uintptr_t)s->address, executable + s->offset, s->file_size);
     }
     BarnixAPI compatibility = *program_api;
     compatibility.version=executable[8];
@@ -500,7 +500,7 @@ static void on_stack(void (*fn)(void), void *top)
 }
 static int app_run(const char *path, int argc, const char *const *argv, char *output, unsigned int capacity, void *swap, int *status)
 {
-    if (!running || nested || !path || !swap || (unsigned int)swap < 0x02000000U || argc < 0 || argc > 31 ||
+    if (!running || nested || !path || !swap || (unsigned int)(uintptr_t)swap < 0x02000000U || argc < 0 || argc > 31 ||
         strlen(path) >= (int)sizeof(job.path)) { run_as_root = 0; return -1; }
     strcpy(job.path, path);
     unsigned int used = 0;

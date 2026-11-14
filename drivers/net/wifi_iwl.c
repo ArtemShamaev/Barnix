@@ -129,8 +129,8 @@ static void pci_write16(unsigned int pci, unsigned int off, unsigned short v)
     __asm__ volatile("outl %0,%1" :: "a"(0x80000000U | pci | (off & ~3U)), "Nd"((unsigned short)0xcf8));
     __asm__ volatile("outw %0,%1" :: "a"(v), "Nd"((unsigned short)(0xcfc + (off & 2))));
 }
-static unsigned int rd(unsigned int reg) { return *(volatile unsigned int *)(card.base + reg); }
-static void wr(unsigned int reg, unsigned int v) { *(volatile unsigned int *)(card.base + reg) = v; }
+static unsigned int rd(unsigned int reg) { return *(volatile unsigned int *)(uintptr_t)(card.base + reg); }
+static void wr(unsigned int reg, unsigned int v) { *(volatile unsigned int *)(uintptr_t)(card.base + reg) = v; }
 static void set_bits(unsigned int reg, unsigned int mask) { wr(reg, rd(reg) | mask); }
 /* 0 once (reg & mask) == mask, within about ms milliseconds */
 static int poll(unsigned int reg, unsigned int mask, unsigned int ms)
@@ -243,7 +243,7 @@ static int load_sections(unsigned char *dram_common, unsigned char **iml, unsign
                 if (!block || fs_read(card.firmware, data + 4, block, length - 4) != (int)(length - 4)) return -1;
                 /* dram.common: umac_img[64], lmac_img[64], virtual_img[64] */
                 unsigned int table = kind == 0 ? 1 : kind == 1 ? 0 : 2;
-                put64(dram_common + (table * DRAM_ENTRIES + count[kind]) * 8, (unsigned int)block);
+                put64(dram_common + (table * DRAM_ENTRIES + count[kind]) * 8, (unsigned int)(uintptr_t)block);
                 count[kind]++;
             }
         }
@@ -262,7 +262,7 @@ static void start_firmware(void)
     wr(CSR_UCODE_DRV_GP1_CLR, UCODE_DRV_GP1_BIT_CMD_BLOCKED);
     wr(CSR_INT, 0xffffffffU);
     if (write_umac_prph(UREG_CHICK, UREG_CHICK_MSI_ENABLE)) return;
-    *(volatile unsigned char *)(card.base + CSR_INT_COALESCING) = 0x40;
+    *(volatile unsigned char *)(uintptr_t)(card.base + CSR_INT_COALESCING) = 0x40;
 
     card.stage = "memory";
     /* RX: free descriptors {rbid, 0, addr}, completions of 32 bytes, status */
@@ -273,7 +273,7 @@ static void start_firmware(void)
     if (!free_ring || !used_ring || !status || !buffers || !tfds || !scratch || !info || !context) return;
     for (unsigned int i = 0; i < RX_BUFFERS; i++) {
         put16(free_ring + i * 16, i + 1);
-        put64(free_ring + i * 16 + 8, (unsigned int)(buffers + i * RX_BUFFER_SIZE));
+        put64(free_ring + i * 16 + 8, (unsigned int)(uintptr_t)(buffers + i * RX_BUFFER_SIZE));
     }
     wr(CSR_MAC_SHADOW_REG_CTRL, rd(CSR_MAC_SHADOW_REG_CTRL) | 0x800fffffU);
 
@@ -285,22 +285,22 @@ static void start_firmware(void)
     put16(scratch + 0, card.hw_rev & 0xffff);            /* version.mac_id */
     put16(scratch + 4, (124 + 3 * DRAM_ENTRIES * 8 + 64) / 4);
     put32(scratch + 8, SCRATCH_RB_SIZE_4K | SCRATCH_MTR_MODE | SCRATCH_MTR_FORMAT_256B);
-    put64(scratch + 48, (unsigned int)free_ring);         /* rbd_cfg.free_rbd_addr */
+    put64(scratch + 48, (unsigned int)(uintptr_t)free_ring);         /* rbd_cfg.free_rbd_addr */
     /* context info v2 (IPC_CONTEXT_INFO_S) */
-    put64(context + 8, (unsigned int)info);               /* prph_info_base_addr */
-    put64(context + 16, (unsigned int)status);            /* cr_head_idx_arr */
-    put64(context + 24, (unsigned int)info + 2048);       /* tr_tail_idx_arr */
-    put64(context + 32, (unsigned int)info + 3072);       /* cr_tail_idx_arr */
-    put64(context + 52, (unsigned int)tfds);              /* mtr_base_addr */
-    put64(context + 60, (unsigned int)used_ring);         /* mcr_base_addr */
+    put64(context + 8, (unsigned int)(uintptr_t)info);               /* prph_info_base_addr */
+    put64(context + 16, (unsigned int)(uintptr_t)status);            /* cr_head_idx_arr */
+    put64(context + 24, (unsigned int)(uintptr_t)info + 2048);       /* tr_tail_idx_arr */
+    put64(context + 32, (unsigned int)(uintptr_t)info + 3072);       /* cr_tail_idx_arr */
+    put64(context + 52, (unsigned int)(uintptr_t)tfds);              /* mtr_base_addr */
+    put64(context + 60, (unsigned int)(uintptr_t)used_ring);         /* mcr_base_addr */
     put16(context + 68, 7 - 3);                           /* mtr_size: log2(128) - 3 */
     put16(context + 70, 9);                               /* mcr_size: log2(512) */
-    put64(context + 88, (unsigned int)scratch);           /* prph_scratch_base_addr */
+    put64(context + 88, (unsigned int)(uintptr_t)scratch);           /* prph_scratch_base_addr */
     put32(context + 96, 124 + 3 * DRAM_ENTRIES * 8);      /* without the fseq table */
 
     card.stage = "image loader";
-    wr(CSR_CTXT_INFO_ADDR, (unsigned int)context); wr(CSR_CTXT_INFO_ADDR + 4, 0);
-    wr(CSR_IML_DATA_ADDR, (unsigned int)iml); wr(CSR_IML_DATA_ADDR + 4, 0);
+    wr(CSR_CTXT_INFO_ADDR, (unsigned int)(uintptr_t)context); wr(CSR_CTXT_INFO_ADDR + 4, 0);
+    wr(CSR_IML_DATA_ADDR, (unsigned int)(uintptr_t)iml); wr(CSR_IML_DATA_ADDR + 4, 0);
     wr(CSR_IML_SIZE_ADDR, iml_size);
     set_bits(CSR_HW_IF_CONFIG_REG, CSR_AUTO_FUNC_BOOT_ENA);
     /* Integrated AX210-family parts: the ROM sets a wrong LTR, so keep the

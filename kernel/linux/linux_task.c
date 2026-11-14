@@ -27,7 +27,7 @@ static int next_pid, root_status;
 static void exit_task(LinuxTrapFrame *frame, int status);
 static void *snapshot(unsigned int slot)
 { return tasks[slot].memory.base == LINUX_LARGE_BASE ? large_snapshots[slot] :
-         (void *)(APP_STACK_TOP + slot * ARENA_SIZE); }
+         (void *)(uintptr_t)(APP_STACK_TOP + slot * ARENA_SIZE); }
 static int snapshots_kept;
 void linux_task_keep(int keep) { snapshots_kept = keep; }
 void linux_task_release_large(void)
@@ -182,7 +182,7 @@ static int wait_task(LinuxTrapFrame *frame)
         if (!matches(parent, child, pid)) continue;
         children = 1;
         if (child->state != ZOMBIE) continue;
-        if (frame->ecx) memcpy((void *)frame->ecx, &child->status, 4);
+        if (frame->ecx) memcpy((void *)(uintptr_t)frame->ecx, &child->status, 4);
         int result = child->pid; child->state = UNUSED;
         return result;
     }

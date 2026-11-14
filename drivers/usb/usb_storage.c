@@ -139,11 +139,11 @@ static int start_controller(void)
                     UsbDevice *m=&devices[controller_count*2+p];
                     m->d_mouse_queue.link=queue.link;
                     m->d_mouse_queue.element=1;
-                    queue.link=(uint32_t)&m->d_mouse_queue|2;
+                    queue.link=(uint32_t)(uintptr_t)&m->d_mouse_queue|2;
                 }
-                for (int i = 0; i < 1024; i++) frames[i] = (uint32_t)&queue | 2;
+                for (int i = 0; i < 1024; i++) frames[i] = (uint32_t)(uintptr_t)&queue | 2;
                 out16(io_base + 6, 0);
-                out32(io_base + 8, (uint32_t)frames);
+                out32(io_base + 8, (uint32_t)(uintptr_t)frames);
                 out8(io_base + 12, 64);
                 out16(io_base, 0xC1); /* Run, configured, 64-byte packets. */
                 if (delay_ms(2)) return -1;
@@ -211,15 +211,15 @@ static int transfer(unsigned char pid, unsigned char endpoint, unsigned short ma
     for (unsigned int i = 0; i < count; i++)
     {
         unsigned int packet = remaining > max_packet ? max_packet : remaining;
-        transfers[i].link = i + 1 == count ? 1 : (uint32_t)&transfers[i + 1] | 4;
+        transfers[i].link = i + 1 == count ? 1 : (uint32_t)(uintptr_t)&transfers[i + 1] | 4;
         transfers[i].status = ((uint32_t)device->d_low<<26) | ACTIVE | (3U << 27) | (1U << 29) | 0x7FF;
         transfers[i].token = pid | ((unsigned int)address << 8) | ((unsigned int)endpoint << 15) |
                              ((unsigned int)((*toggle + i) & 1) << 19) | (((packet - 1) & 0x7FF) << 21);
-        transfers[i].buffer = (uint32_t)(dma + offset);
+        transfers[i].buffer = (uint32_t)(uintptr_t)(dma + offset);
         offset += packet; remaining -= packet;
     }
     __asm__ volatile("" ::: "memory");
-    queue.element = (uint32_t)transfers;
+    queue.element = (uint32_t)(uintptr_t)transfers;
     unsigned int completed = 0, bytes = 0;
     int result = -1;
     for (unsigned int ms = 0; ms < 200; ms++)
@@ -373,10 +373,10 @@ static void link_queue(UsbDevice *d)
 {
     if (d->d_legacy >= 0 || d->d_linked) return;
     QH *q = &queue;
-    for (int i = 0; i < 64 && !(q->link & 1); i++) q = (QH *)(q->link & ~15U);
+    for (int i = 0; i < 64 && !(q->link & 1); i++) q = (QH *)(uintptr_t)(q->link & ~15U);
     d->d_mouse_queue.link = 1; d->d_mouse_queue.element = 1;
     __asm__ volatile("" ::: "memory");
-    q->link = (uint32_t)&d->d_mouse_queue | 2;
+    q->link = (uint32_t)(uintptr_t)&d->d_mouse_queue | 2;
     d->d_linked = (unsigned char)(d->d_controller + 1);
 }
 /* Look at every hub port once; reset and enumerate new devices. */
@@ -651,12 +651,12 @@ static int uhci_mouse(int n)
             if (length <= device->d_mouse_size) changed |= report(n, length);
         }
     }
-    td->link = 1; td->buffer = (uint32_t)device->d_report;
+    td->link = 1; td->buffer = (uint32_t)(uintptr_t)device->d_report;
     td->token = PID_IN | ((uint32_t)address << 8) | ((uint32_t)device->d_mouse_ep << 15) |
                 ((uint32_t)device->d_mouse_toggle << 19) | ((device->d_mouse_size - 1U) << 21);
     td->status = ACTIVE | (3U << 27) | (1U << 29) | ((uint32_t)device->d_low << 26) | 0x7ff;
     __asm__ volatile("" ::: "memory");
-    device->d_mouse_queue.element = (uint32_t)td;
+    device->d_mouse_queue.element = (uint32_t)(uintptr_t)td;
     device->d_pending = 1;
     return changed;
 }

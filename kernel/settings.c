@@ -16,7 +16,7 @@ static int theme_index(const char *name) {
 int theme_set(const char *name) {
     static unsigned int next=0x6d2b79f5U;
     next=next*1664525U+1013904223U;
-    int i=!strcmp(name,"random") ? ((next>>16) % 10) : theme_index(name);
+    int i=!strcmp(name,"random") ? (int)((next>>16) % 10) : theme_index(name);
     if(i<0)return -1;
     char path[96]; user_config_path("theme.cfg",path);
     if(fs_write(path,names[i],strlen(names[i])))return -1;

@@ -94,7 +94,7 @@ void console_video_init(const MultibootInfo *info)
     for (int i = 0; i < 16; i++) colors[i] = (palette[i][0] << info->red_position) |
         (palette[i][1] << info->green_position) | (palette[i][2] << info->blue_position);
     for (unsigned int y = 0; y < height; y++)
-        memset((void *)(framebuffer + y * pitch), 0, width * bpp);
+        memset((void *)(uintptr_t)(framebuffer + y * pitch), 0, width * bpp);
     console_cells = console_text;
     for (int i = 0; i < 2000; i++) { console_text[i] = 0x0720; previous[i] = 0xffff; }
 }
@@ -128,7 +128,7 @@ void console_present(void)
         for (unsigned int y = 0; y < 16; y++) {
             unsigned int bits = console_glyph_row(cell & 255, y);
             if ((int)i == active && y >= 14) bits = 255;
-            unsigned char *line = (unsigned char *)(framebuffer + (origin_y + i / 80 * 16 + y) * pitch +
+            unsigned char *line = (unsigned char *)(uintptr_t)(framebuffer + (origin_y + i / 80 * 16 + y) * pitch +
                                                    (origin_x + i % 80 * 8) * bytes_per_pixel);
             for (unsigned int x = 0; x < 8; x++) {
                 unsigned int color = bits & (128U >> x) ? fg : bg;
@@ -165,7 +165,7 @@ void console_blit(const unsigned short *cells) {
 
 static void clear_framebuffer(void)
 {
-    for (unsigned int y = 0; y < height; y++) memset((void *)(framebuffer + y * pitch), 0, width * bytes_per_pixel);
+    for (unsigned int y = 0; y < height; y++) memset((void *)(uintptr_t)(framebuffer + y * pitch), 0, width * bytes_per_pixel);
 }
 int console_display(unsigned int *out_width, unsigned int *out_height)
 {
@@ -203,7 +203,7 @@ int console_rgb_blit(const unsigned int *pixels, unsigned int w, unsigned int h)
                 seen[x] = c;
                 if (!native) c = (c >> 16 & 255) << red_shift | (c >> 8 & 255) << green_shift | (c & 255) << blue_shift;
                 for (unsigned int i = 0; i < up; i++) {
-                    volatile unsigned int *out = (volatile unsigned int *)(address + i * pitch) + x * up;
+                    volatile unsigned int *out = (volatile unsigned int *)(uintptr_t)(address + i * pitch) + x * up;
                     for (unsigned int k = 0; k < up; k++) out[k] = c;
                 }
             }
@@ -238,9 +238,9 @@ int console_rgb_blit(const unsigned int *pixels, unsigned int w, unsigned int h)
         for (unsigned int i = 0; i < up; i++) {
             unsigned int address = framebuffer + (oy + y * up + i) * pitch + ox * bytes_per_pixel;
             if (bytes_per_pixel == 4) {   /* dword stores: the framebuffer is uncached */
-                volatile unsigned int *out = (volatile unsigned int *)address;
+                volatile unsigned int *out = (volatile unsigned int *)(uintptr_t)address;
                 for (unsigned int x = 0; x < ow; x++) out[x] = row[x];
-            } else memcpy((void *)address, line, ow * bytes_per_pixel);
+            } else memcpy((void *)(uintptr_t)address, line, ow * bytes_per_pixel);
         }
     }
     return 0;
@@ -258,7 +258,7 @@ int console_graphic_blit(const unsigned char *pixels) {
         unsigned int index=y*640+x,color=pixels[index]&15;
         if(graphic_active && graphic_previous[index]==color)continue;
         graphic_previous[index]=color;
-        unsigned char *out=(unsigned char *)(framebuffer+(origin_y+y)*pitch+(origin_x+x)*bytes_per_pixel);
+        unsigned char *out=(unsigned char *)(uintptr_t)(framebuffer+(origin_y+y)*pitch+(origin_x+x)*bytes_per_pixel);
         for(unsigned int b=0;b<bytes_per_pixel;b++)out[b]=colors[color]>>(b*8);
     }
     graphic_active=1;return 0;

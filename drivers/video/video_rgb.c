@@ -183,8 +183,8 @@ static void enter_bochs(unsigned int w, unsigned int h)
         bochs_read(9) != BOCHS_SKIP_ROWS) {
         bochs_write(4, 0); vga_load(&saved, 1); bochs_lfb = 0; enter_vga(); mode = VGA_MODE; return;
     }
-    volatile unsigned int *screen = (volatile unsigned int *)(bochs_lfb + BOCHS_SKIP_ROWS * BOCHS_WIDTH * 4);
-    for (int i = 0; i < BOCHS_WIDTH * BOCHS_HEIGHT; i++) screen[i] = 0;
+    volatile unsigned int *screen = (volatile unsigned int *)(uintptr_t)(bochs_lfb + BOCHS_SKIP_ROWS * BOCHS_WIDTH * 4);
+    for (unsigned int i = 0; i < BOCHS_WIDTH * BOCHS_HEIGHT; i++) screen[i] = 0;
 }
 
 void video_leave(void)
@@ -242,7 +242,7 @@ int video_present(const unsigned int *pixels, unsigned int w, unsigned int h)
         for (unsigned int i = 0; i < up; i++) {
             unsigned int line = oy + y * up + i;
             if (mode == BOCHS_MODE) {
-                volatile unsigned int *out = (volatile unsigned int *)(bochs_lfb +
+                volatile unsigned int *out = (volatile unsigned int *)(uintptr_t)(bochs_lfb +
                     ((BOCHS_SKIP_ROWS + line) * BOCHS_WIDTH + ox) * 4);
                 for (unsigned int x = 0; x < ow; x++) out[x] = row[x];
             } else {

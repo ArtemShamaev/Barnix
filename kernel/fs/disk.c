@@ -253,10 +253,10 @@ static int ata_dma_transfer(unsigned int lba, void *buffer, unsigned int count, 
     unsigned short bm = ata_bm_base + (ata_unit < 2 ? 0 : 8);
     unsigned int bytes = count * 512;
     if (write) memcpy(ata_dma_buffer, buffer, bytes);
-    ata_prd[0] = (unsigned int)ata_dma_buffer;
+    ata_prd[0] = (unsigned int)(uintptr_t)ata_dma_buffer;
     ata_prd[1] = 0x80000000U | (bytes & 0xFFFF);   /* 0 means 64 KiB */
     outb(bm, 0);
-    outl(bm + 4, (unsigned int)ata_prd);
+    outl(bm + 4, (unsigned int)(uintptr_t)ata_prd);
     outb(bm + 2, inb(bm + 2) | 0x06);               /* clear interrupt and error */
     outb(bm, write ? 0x00 : 0x08);                  /* 0x08: device to memory */
     if (ata_prepare_lba(lba, count) != 0)

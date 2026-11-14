@@ -133,25 +133,25 @@ void smp_init(void)
     x2apic = (base & (1U << 10)) != 0;
     if (!x2apic) {
         if (base >> 32) return;
-        lapic = (volatile unsigned int *)(unsigned int)(base & 0xfffff000U);
+        lapic = (volatile unsigned int *)(uintptr_t)(unsigned int)(base & 0xfffff000U);
         lapic[0xf0 / 4] |= 0x1ff;                         /* software enable, spurious 0xff */
     } else wrmsr(0x80f, rdmsr(0x80f) | 0x1ff);
     unsigned int page = trampoline_page();
     void *stacks = memory_kernel_alloc(SMP_MAX * STACK_BYTES);
     if (!page || !stacks) return;
 
-    unsigned int nmi = (unsigned int)smp_nmi;
+    unsigned int nmi = (unsigned int)(uintptr_t)smp_nmi;
     ap_idt[2] = (nmi & 0xffffU) | 0x08U << 16 | (unsigned long long)(0x8e00U | (nmi & 0xffff0000U)) << 32;
-    ap_idtr.limit = sizeof(ap_idt) - 1; ap_idtr.base = (unsigned int)ap_idt;
+    ap_idtr.limit = sizeof(ap_idt) - 1; ap_idtr.base = (unsigned int)(uintptr_t)ap_idt;
 
-    unsigned char *code = (unsigned char *)page;
+    unsigned char *code = (unsigned char *)(uintptr_t)page;
     memcpy(code, smp_trampoline, (unsigned int)(smp_trampoline_end - smp_trampoline));
-    *(unsigned int *)(code + (unsigned int)smp_tr_base) = page;
-    *(unsigned int *)(code + (unsigned int)smp_tr_gdt) = page + (unsigned int)smp_tr_gdt_offset;
-    *(unsigned int *)(code + (unsigned int)smp_tr_far) = page + (unsigned int)smp_tr_protected;
-    fields = (TrampolineFields *)(code + (unsigned int)smp_tr_fields);
+    *(unsigned int *)(code + (unsigned int)(uintptr_t)smp_tr_base) = page;
+    *(unsigned int *)(code + (unsigned int)(uintptr_t)smp_tr_gdt) = page + (unsigned int)(uintptr_t)smp_tr_gdt_offset;
+    *(unsigned int *)(code + (unsigned int)(uintptr_t)smp_tr_far) = page + (unsigned int)(uintptr_t)smp_tr_protected;
+    fields = (TrampolineFields *)(code + (unsigned int)(uintptr_t)smp_tr_fields);
     fields->arrived = 0; fields->max = SMP_MAX - 1; fields->stack_bytes = STACK_BYTES;
-    fields->stacks = (unsigned int)stacks; fields->entry = (unsigned int)ap_main;
+    fields->stacks = (unsigned int)(uintptr_t)stacks; fields->entry = (unsigned int)(uintptr_t)ap_main;
     struct { unsigned short limit; unsigned int base; } __attribute__((packed)) gdtr;
     __asm__ volatile("sgdt %0" : "=m"(gdtr));
     fields->gdt_limit = gdtr.limit; fields->gdt_base = gdtr.base;

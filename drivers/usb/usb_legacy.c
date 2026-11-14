@@ -139,7 +139,7 @@ static int initialize(unsigned int b, unsigned int s, unsigned int f,
   unsigned short command = pci(b, s, f, 4) | 6;
   out32(0xcf8, 0x80000004U | (b << 16) | (s << 11) | (f << 8));
   __asm__ volatile("outw %0,%1" ::"a"(command), "Nd"((unsigned short)0xcfc));
-  volatile uint32_t *cap = (volatile uint32_t *)base;
+  volatile uint32_t *cap = (volatile uint32_t *)(uintptr_t)base;
   if (kind == 0x20) {
     unsigned int offset = (cap[2] >> 8) & 255;
     for (unsigned int n = 0; offset && n < 48; n++) {
@@ -160,7 +160,7 @@ static int initialize(unsigned int b, unsigned int s, unsigned int f,
     unsigned int length = cap[0] & 255;
     if (length < 16 || length > 128)
       return -1;
-    h->op = (volatile uint32_t *)(base + length);
+    h->op = (volatile uint32_t *)(uintptr_t)(base + length);
     h->ports = cap[1] & 15;
     h->op[0] &= ~1U;
     if (wait_bits(h->op + 1, 1U << 12, 1U << 12, 100))
@@ -172,14 +172,14 @@ static int initialize(unsigned int b, unsigned int s, unsigned int f,
     h->op[1] = 0x3f;
     h->op[4] = 0;
     h->op[3] = 0;
-    h->qh.link = (uint32_t)&h->qh | 2;
+    h->qh.link = (uint32_t)(uintptr_t)&h->qh | 2;
     h->qh.ep = (1U << 15) | (1U << 14) | (2U << 12) | (64U << 16);
     h->qh.overlay.next = h->qh.overlay.alt = 1;
     h->qh.overlay.token = 1U << 6;
-    h->op[6] = (uint32_t)&h->qh;
+    h->op[6] = (uint32_t)(uintptr_t)&h->qh;
     for (unsigned int i = 0; i < 1024; i++)
       h->frames[i] = 1;
-    h->op[5] = (uint32_t)h->frames;
+    h->op[5] = (uint32_t)(uintptr_t)h->frames;
     h->op[0] = 1 | (8U << 16);
     h->op[0x10] = 1;
     if (wait_bits(h->op + 1, 1U << 12, 0, 100))
@@ -220,7 +220,7 @@ static int initialize(unsigned int b, unsigned int s, unsigned int f,
     cap[2] = 1;
     if (wait_bits(cap + 2, 1, 0, 100))
       return -1;
-    cap[6] = (uint32_t)h->hcca;
+    cap[6] = (uint32_t)(uintptr_t)h->hcca;
     cap[8] = cap[10] = 0;
     cap[0xd] = interval | (((interval - 210) * 6 / 7) << 16) |
                ((cap[0xd] ^ (1U << 31)) & (1U << 31));
@@ -251,10 +251,10 @@ static int initialize(unsigned int b, unsigned int s, unsigned int f,
   if (h->ports) {
     if (kind == 0x20) {
       for (int n = 0; n < 1024; n++)
-        h->frames[n] = (uint32_t)&h->anchor | 2;
+        h->frames[n] = (uint32_t)(uintptr_t)&h->anchor | 2;
     } else {
       for (int n = 0; n < 32; n++)
-        ((uint32_t *)h->hcca)[n] = (uint32_t)&h->anchor_ed;
+        ((uint32_t *)h->hcca)[n] = (uint32_t)(uintptr_t)&h->anchor_ed;
       h->op[1] |= 4;
     }
   }
@@ -363,9 +363,9 @@ static void fill_qtd(Qtd *t, unsigned int pid, unsigned int toggle,
                      unsigned char *data, unsigned int length) {
   memset(t, 0, sizeof(*t));
   t->next = t->alt = 1;
-  t->buffer[0] = (uint32_t)data;
+  t->buffer[0] = (uint32_t)(uintptr_t)data;
   for (int n = 1; n < 5; n++)
-    t->buffer[n] = ((uint32_t)data & ~4095U) + n * 4096;
+    t->buffer[n] = ((uint32_t)(uintptr_t)data & ~4095U) + n * 4096;
   t->token = (toggle << 31) | (length << 16) | (3U << 10) | (pid << 8) | 128;
 }
 static void fill_ot(Ot *t, unsigned int pid, unsigned int toggle,
@@ -373,9 +373,9 @@ static void fill_ot(Ot *t, unsigned int pid, unsigned int toggle,
   memset(t, 0, 2 * sizeof(*t));
   t->flags = 0xf0000000U | ((2U | toggle) << 24) | (7U << 21) | (pid << 19) |
              (1U << 18);
-  t->buffer = length ? (uint32_t)data : 0;
-  t->end = length ? (uint32_t)data + length - 1 : 0;
-  t->next = (uint32_t)(t + 1);
+  t->buffer = length ? (uint32_t)(uintptr_t)data : 0;
+  t->end = length ? (uint32_t)(uintptr_t)data + length - 1 : 0;
+  t->next = (uint32_t)(uintptr_t)(t + 1);
 }
 int usb_legacy_is_ehci(int index) {
   if (index < 0 || index >= nport)
@@ -427,7 +427,7 @@ int usb_legacy_transfer(int index, unsigned int address, unsigned int endpoint,
     ehci_route(&h->qh, address, endpoint, packet, route, 1, 0);
     h->qh.current = 0;
     memset(&h->qh.overlay, 0, sizeof(Qtd));
-    h->qh.overlay.next = (uint32_t)&h->qtd;
+    h->qh.overlay.next = (uint32_t)(uintptr_t)&h->qtd;
     h->qh.overlay.alt = 1;
     barrier();
     if (async_schedule(h, 1))
@@ -448,11 +448,11 @@ int usb_legacy_transfer(int index, unsigned int address, unsigned int endpoint,
     fill_ot(h->td, pid == 0x2d ? 0 : input ? 2 : 1, *toggle, h->dma, length);
     h->ed.flags = address | (endpoint << 7) | ohci_low(index, route) |
                   (packet << 16);
-    h->ed.tail = (uint32_t)&h->td[1];
-    h->ed.head = (uint32_t)&h->td[0];
+    h->ed.tail = (uint32_t)(uintptr_t)&h->td[1];
+    h->ed.head = (uint32_t)(uintptr_t)&h->td[0];
     h->ed.next = 0;
     int control = endpoint == 0;
-    h->op[control ? 8 : 10] = (uint32_t)&h->ed;
+    h->op[control ? 8 : 10] = (uint32_t)(uintptr_t)&h->ed;
     h->op[control ? 9 : 11] = 0;
     barrier();
     h->op[1] |= control ? 16 : 32;
@@ -465,7 +465,7 @@ int usb_legacy_transfer(int index, unsigned int address, unsigned int endpoint,
     usb_delay_ms(2);
     if ((h->td[0].flags >> 28) != 0)
       return -1;
-    result = h->td[0].buffer ? h->td[0].buffer - (uint32_t)h->dma : length;
+    result = h->td[0].buffer ? h->td[0].buffer - (uint32_t)(uintptr_t)h->dma : length;
     if (result > length)
       return -1;
     *toggle = (h->ed.head >> 1) & 1;
@@ -478,11 +478,11 @@ static void fill_pipe_qtd(Pipe *p, int k, unsigned int toggle, unsigned int pack
   Qtd *t = &p->qtd[k];
   t->token = 0;
   barrier();
-  t->next = (uint32_t)&p->qtd[k ^ 1];
+  t->next = (uint32_t)(uintptr_t)&p->qtd[k ^ 1];
   t->alt = 1;
-  t->buffer[0] = (uint32_t)p->dma[k];
+  t->buffer[0] = (uint32_t)(uintptr_t)p->dma[k];
   for (int n = 1; n < 5; n++)
-    t->buffer[n] = ((uint32_t)p->dma[k] & ~4095U) + n * 4096;
+    t->buffer[n] = ((uint32_t)(uintptr_t)p->dma[k] & ~4095U) + n * 4096;
   for (int n = 0; n < 5; n++)
     t->high[n] = 0;
   barrier();
@@ -507,12 +507,12 @@ int usb_legacy_pipe(int index) {
       p->qh.overlay.token = 1U << 6;
       p->qh.link = h->anchor.link;
       barrier();
-      h->anchor.link = (uint32_t)&p->qh | 2;
+      h->anchor.link = (uint32_t)(uintptr_t)&p->qh | 2;
     } else {
       p->ed.flags = 1U << 14;
       p->ed.next = h->anchor_ed.next;
       barrier();
-      h->anchor_ed.next = (uint32_t)&p->ed;
+      h->anchor_ed.next = (uint32_t)(uintptr_t)&p->ed;
     }
     return n;
   }
@@ -525,16 +525,16 @@ void usb_legacy_pipe_close(int pipe) {
   Host *h = &hosts[ports[p->port].host];
   if (h->kind == 0x20) {
     int on = h->live && !periodic_schedule(h, 0);
-    for (EhciQh *q = &h->anchor; !(q->link & 1); q = (EhciQh *)(q->link & ~31U))
-      if ((q->link & ~31U) == (uint32_t)&p->qh) { q->link = p->qh.link; break; }
+    for (EhciQh *q = &h->anchor; !(q->link & 1); q = (EhciQh *)(uintptr_t)(q->link & ~31U))
+      if ((q->link & ~31U) == (uint32_t)(uintptr_t)&p->qh) { q->link = p->qh.link; break; }
     if (on)
       periodic_schedule(h, 1);
   } else {
     p->ed.flags |= 1U << 14;
     if (h->live)
       usb_delay_ms(2);
-    for (Ed *e = &h->anchor_ed; e->next; e = (Ed *)e->next)
-      if (e->next == (uint32_t)&p->ed) { e->next = p->ed.next; break; }
+    for (Ed *e = &h->anchor_ed; e->next; e = (Ed *)(uintptr_t)e->next)
+      if (e->next == (uint32_t)(uintptr_t)&p->ed) { e->next = p->ed.next; break; }
     if (h->live)
       usb_delay_ms(2);
   }
@@ -552,12 +552,12 @@ static int pipe_start(Pipe *p, Host *h, unsigned int address, unsigned int endpo
       return -1;
     fill_pipe_qtd(p, 0, toggle, packet);
     p->qtd[1].token = 0;
-    p->qtd[1].next = (uint32_t)&p->qtd[0];
+    p->qtd[1].next = (uint32_t)(uintptr_t)&p->qtd[0];
     p->qtd[1].alt = 1;
     ehci_route(&p->qh, address, endpoint, packet, route, 0, 1);
     p->qh.current = 0;
     memset((void *)&p->qh.overlay, 0, sizeof(Qtd));
-    p->qh.overlay.next = (uint32_t)&p->qtd[0];
+    p->qh.overlay.next = (uint32_t)(uintptr_t)&p->qtd[0];
     p->qh.overlay.alt = 1;
     barrier();
     if (periodic_schedule(h, 1))
@@ -567,8 +567,8 @@ static int pipe_start(Pipe *p, Host *h, unsigned int address, unsigned int endpo
     usb_delay_ms(2);
     fill_ot(p->td, 2, toggle, p->dma[0], packet);
     p->ed.flags = address | (endpoint << 7) | ohci_low(index, route) | (packet << 16) | (1U << 14);
-    p->ed.tail = (uint32_t)&p->td[1];
-    p->ed.head = (uint32_t)&p->td[0];
+    p->ed.tail = (uint32_t)(uintptr_t)&p->td[1];
+    p->ed.head = (uint32_t)(uintptr_t)&p->td[0];
     barrier();
     p->ed.flags &= ~(1U << 14);
   }
@@ -626,7 +626,7 @@ int usb_legacy_mouse(int pipe, unsigned int address, unsigned int endpoint,
       p->started = 0;
       return -3;
     }
-    result = t->buffer ? t->buffer - (uint32_t)p->dma[k] : packet;
+    result = t->buffer ? t->buffer - (uint32_t)(uintptr_t)p->dma[k] : packet;
     if ((unsigned int)result > packet) {
       p->status = 0x300;
       p->started = 0;
@@ -640,11 +640,11 @@ int usb_legacy_mouse(int pipe, unsigned int address, unsigned int endpoint,
     Ot *next = &p->td[k ^ 1];
     t->flags = 0; t->buffer = t->end = 0; t->next = 0;
     next->flags = 0xf0000000U | (7U << 21) | (2U << 19) | (1U << 18);   /* toggle from the ED */
-    next->buffer = (uint32_t)p->dma[k ^ 1];
-    next->end = (uint32_t)p->dma[k ^ 1] + packet - 1;
-    next->next = (uint32_t)t;
+    next->buffer = (uint32_t)(uintptr_t)p->dma[k ^ 1];
+    next->end = (uint32_t)(uintptr_t)p->dma[k ^ 1] + packet - 1;
+    next->next = (uint32_t)(uintptr_t)t;
     barrier();
-    p->ed.tail = (uint32_t)t;
+    p->ed.tail = (uint32_t)(uintptr_t)t;
   }
   p->current = k ^ 1;
   return result;

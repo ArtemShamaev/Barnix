@@ -1,6 +1,7 @@
 /* Realtek Ethernet: RTL8139 (ring buffer receive, four transmit slots) and
  * the RTL8169/8110/8111/8168/8101 family (descriptor rings), through I/O
  * ports, polled. */
+#include <stdint.h>
 #include "net_driver.h"
 #include "barnix.h"
 
@@ -38,7 +39,7 @@ static unsigned int slot, offset;
 static void start8139(void)
 {
     reset();
-    o32(0x30, (unsigned int)ring);
+    o32(0x30, (unsigned int)(uintptr_t)ring);
     o16(0x3c, 0);                                                    /* no interrupts */
     o8(0x37, 0x0c);                                                  /* receive, transmit */
     o32(0x44, 0x0e | (1U << 7) | (2U << 11));                        /* match, multicast, broadcast; wrap; 32K ring */
@@ -57,7 +58,7 @@ static int send8139(const void *frame, unsigned int length)
     }
     memcpy(slots[slot], frame, length);
     if (length < 60) { memset(slots[slot] + length, 0, 60 - length); length = 60; }
-    o32(0x20 + 4 * slot, (unsigned int)slots[slot]);
+    o32(0x20 + 4 * slot, (unsigned int)(uintptr_t)slots[slot]);
     o32(status, length);
     slot = (slot + 1) & 3;
     return 0;
@@ -107,7 +108,7 @@ static int send8169(const void *frame, unsigned int length)
     if (d->options & OWN) return -1;
     memcpy(txb[tx_at], frame, length);
     if (length < 60) { memset(txb[tx_at] + length, 0, 60 - length); length = 60; }
-    d->low = (unsigned int)txb[tx_at]; d->high = 0; d->vlan = 0;
+    d->low = (unsigned int)(uintptr_t)txb[tx_at]; d->high = 0; d->vlan = 0;
     __asm__ volatile("" ::: "memory");
     d->options = OWN | (1U << 29) | (1U << 28) | (tx_at == DESCS - 1 ? EOR : 0) | length;
     tx_at = (tx_at + 1) % DESCS;
@@ -137,7 +138,7 @@ int rtl8169_probe(unsigned int pci, unsigned int id, NetDriver *driver)
     if (reset()) return -1;
     for (int i = 0; i < 6; i++) driver->mac[i] = i8(i);
     for (int i = 0; i < DESCS; i++) {
-        rxd[i].low = (unsigned int)rxb[i]; rxd[i].high = 0; rxd[i].vlan = 0;
+        rxd[i].low = (unsigned int)(uintptr_t)rxb[i]; rxd[i].high = 0; rxd[i].vlan = 0;
         rxd[i].options = OWN | (i == DESCS - 1 ? EOR : 0) | 2048;
         txd[i].low = txd[i].high = txd[i].vlan = 0; txd[i].options = i == DESCS - 1 ? EOR : 0;
     }
@@ -147,8 +148,8 @@ int rtl8169_probe(unsigned int pci, unsigned int id, NetDriver *driver)
     o16(0xe0, i16(0xe0) & ~(1U << 5));                               /* C+: no checksum offload */
     o16(0xda, 2048);                                                 /* largest received frame */
     o8(0xec, 0x3b);                                                  /* largest transmitted */
-    o32(0x20, (unsigned int)txd); o32(0x24, 0);
-    o32(0xe4, (unsigned int)rxd); o32(0xe8, 0);
+    o32(0x20, (unsigned int)(uintptr_t)txd); o32(0x24, 0);
+    o32(0xe4, (unsigned int)(uintptr_t)rxd); o32(0xe8, 0);
     o8(0x37, 0x0c);                                                  /* receive, transmit */
     o32(0x40, (3U << 24) | (7U << 8));                               /* standard gap, unlimited DMA */
     o32(0x44, (7U << 13) | (7U << 8) | 0x0e);                        /* match, multicast, broadcast */

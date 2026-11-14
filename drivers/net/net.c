@@ -150,7 +150,7 @@ int net_connect_wifi(const char *name, const char *password)
     if (name != wifi_name) {
         strcpy(wifi_name, name);
         wifi_password[0] = 0;
-        if (password && strlen(password) < sizeof(wifi_password)) strcpy(wifi_password, password);
+        if (password && strlen(password) < (int)sizeof(wifi_password)) strcpy(wifi_password, password);
     }
     return 0;
 }

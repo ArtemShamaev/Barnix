@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include "linux_idt.h"
 #include "linux_abi.h"
 #include "linux_exec.h"
@@ -17,7 +18,7 @@ extern unsigned int linux_fault_vector;
 
 static void set_gate(unsigned int vector, void (*handler)(void), unsigned char flags)
 {
-    unsigned int address = (unsigned int)handler;
+    unsigned int address = (unsigned int)(uintptr_t)handler;
     idt[vector].low = address; idt[vector].selector = 0x08;
     idt[vector].zero = 0; idt[vector].flags = flags; /* present, DPL3, interrupt gate */
     idt[vector].high = address >> 16;
@@ -28,7 +29,7 @@ void linux_idt_init(void)
     __asm__ volatile("sidtl %0" : "=m"(previous_idt));
     for (unsigned int i = 0; i < 32; i++) set_gate(i, linux_fault_stubs[i], 0x8E);
     set_gate(0x80, linux_int80, 0xEE);
-    IdtPointer pointer = {(unsigned short)(sizeof(idt) - 1), (unsigned int)idt};
+    IdtPointer pointer = {(unsigned short)(sizeof(idt) - 1), (unsigned int)(uintptr_t)idt};
     __asm__ volatile("lidtl %0" : : "m"(pointer));
 }
 

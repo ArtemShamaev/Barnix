@@ -16,10 +16,10 @@ static inline void out8(unsigned short p, unsigned char v) { __asm__ volatile("o
 static inline void out16(unsigned short p, unsigned short v) { __asm__ volatile("outw %0,%1"::"a"(v),"Nd"(p):"memory"); }
 static inline void out32(unsigned short p, unsigned int v) { __asm__ volatile("outl %0,%1"::"a"(v),"Nd"(p):"memory"); }
 static inline void barrier(void) { __asm__ volatile("":::"memory"); }
-static unsigned int mmread(unsigned int base, unsigned int off) { return *(volatile unsigned int *)(base + off); }
-static void mmwrite(unsigned int base, unsigned int off, unsigned int value) { *(volatile unsigned int *)(base + off) = value; }
+static unsigned int mmread(unsigned int base, unsigned int off) { return *(volatile unsigned int *)(uintptr_t)(base + off); }
+static void mmwrite(unsigned int base, unsigned int off, unsigned int value) { *(volatile unsigned int *)(uintptr_t)(base + off) = value; }
 static void mmaddress(unsigned int base, unsigned int off, const void *address)
-{ mmwrite(base, off, (unsigned int)address); mmwrite(base, off + 4, 0); }
+{ mmwrite(base, off, (unsigned int)(uintptr_t)address); mmwrite(base, off + 4, 0); }
 static unsigned int pci_read(unsigned int pci, unsigned int off)
 { out32(0xcf8, 0x80000000U | pci | (off & ~3U)); return in32(0xcfc); }
 static void pci_enable(unsigned int pci)
@@ -68,7 +68,7 @@ void storage_pci_boot_memory(const MultibootInfo *info, void (*progress)(unsigne
     if (info->flags & (1U << 12)) reserve_mmio(info->framebuffer_low | ((uint64_t)info->framebuffer_high << 32),
                                             (uint64_t)info->framebuffer_pitch * info->framebuffer_height);
     for (unsigned int off = 0; off < info->mmap_length;) {
-        const unsigned int *record = (const unsigned int *)(info->mmap_addr + off);
+        const unsigned int *record = (const unsigned int *)(uintptr_t)(info->mmap_addr + off);
         if (info->mmap_length - off < 24 || record[0] < 20 || record[0] > info->mmap_length - off - 4) {
             pci_allocator_ready = 0; return;
         }
@@ -285,13 +285,13 @@ static int ahci_command(Device *d, unsigned char command, unsigned int lba, unsi
     unsigned char *table = ahci_tables[index];
     memset(header, 0, 32); memset(table, 0, 256);
     header[0] = 5 | (write ? 1U << 6 : 0) | (bytes ? 1U << 16 : 0);
-    header[2] = (unsigned int)table;
+    header[2] = (unsigned int)(uintptr_t)table;
     table[0] = 0x27; table[1] = 0x80; table[2] = command;
     table[4] = lba; table[5] = lba >> 8; table[6] = lba >> 16; table[7] = 0x40;
     table[8] = lba >> 24; table[12] = count; table[13] = count >> 8;
     if (bytes) {
         unsigned int *prdt = (unsigned int *)(table + 128);
-        prdt[0] = (unsigned int)buffer; prdt[3] = bytes - 1;
+        prdt[0] = (unsigned int)(uintptr_t)buffer; prdt[3] = bytes - 1;
     }
     mmwrite(port, 0x10, 0xffffffffU); mmwrite(port, 0x30, 0xffffffffU);
     barrier(); mmwrite(port, 0x38, 1);
@@ -387,17 +387,17 @@ static void nvme_init(unsigned int pci)
     mmwrite(base, 0x14, 1 | (6U << 16) | (4U << 20));
     if (wait_bits(base, 0x1c, 3, 1)) return;
     unsigned int cmd[16] = {0};
-    cmd[0] = 5; cmd[6] = (unsigned int)n->queues[1].cq; cmd[10] = 1 | ((QDEPTH - 1) << 16); cmd[11] = 1;
+    cmd[0] = 5; cmd[6] = (unsigned int)(uintptr_t)n->queues[1].cq; cmd[10] = 1 | ((QDEPTH - 1) << 16); cmd[11] = 1;
     if (nvme_command(n, 0, cmd)) return;
-    memset(cmd, 0, sizeof(cmd)); cmd[0] = 1; cmd[6] = (unsigned int)n->queues[1].sq;
+    memset(cmd, 0, sizeof(cmd)); cmd[0] = 1; cmd[6] = (unsigned int)(uintptr_t)n->queues[1].sq;
     cmd[10] = 1 | ((QDEPTH - 1) << 16); cmd[11] = 1 | (1U << 16);
     if (nvme_command(n, 0, cmd)) return;
-    memset(cmd, 0, sizeof(cmd)); cmd[0] = 6; cmd[6] = (unsigned int)bounce; cmd[10] = 2;
+    memset(cmd, 0, sizeof(cmd)); cmd[0] = 6; cmd[6] = (unsigned int)(uintptr_t)bounce; cmd[10] = 2;
     if (nvme_command(n, 0, cmd)) return;
     unsigned int ids[PCI_STORAGE_MAX];
     memcpy(ids, bounce, sizeof(ids));
     for (unsigned int i = 0; i < PCI_STORAGE_MAX && ids[i] && device_count < PCI_STORAGE_MAX; i++) {
-        memset(cmd, 0, sizeof(cmd)); cmd[0] = 6; cmd[1] = ids[i]; cmd[6] = (unsigned int)bounce;
+        memset(cmd, 0, sizeof(cmd)); cmd[0] = 6; cmd[1] = ids[i]; cmd[6] = (unsigned int)(uintptr_t)bounce;
         if (nvme_command(n, 0, cmd)) continue;
         unsigned int fmt = bounce[26] & 15, shift = bounce[128 + fmt * 4 + 2];
         if (fmt > bounce[25] || bounce[128 + fmt * 4] || bounce[129 + fmt * 4] || shift < 9 || shift > 12) continue;
@@ -421,7 +421,7 @@ typedef struct {
 static Virtio virtio[CONTROLLERS] __attribute__((aligned(4096)));
 static unsigned int virtio_count;
 static void vstatus(Virtio *v, unsigned char value)
-{ if (v->modern) *(volatile unsigned char *)(v->common + 20) = value; else out8(v->io + 18, value); }
+{ if (v->modern) *(volatile unsigned char *)(uintptr_t)(v->common + 20) = value; else out8(v->io + 18, value); }
 static int virtio_request(Device *d, unsigned int lba, void *buffer, unsigned int bytes, int write, int flush)
 {
     Virtio *v = &virtio[d->controller];
@@ -433,12 +433,12 @@ static int virtio_request(Device *d, unsigned int lba, void *buffer, unsigned in
     v->request[0] = flush ? 4 : write ? 1 : 0; v->request[1] = 0;
     v->request[2] = lba; v->request[3] = 0; v->status = 255;
     memset(desc, 0, 48);
-    desc[0] = (unsigned int)v->request; desc[2] = 16; desc[3] = 1 | ((flush ? 2U : 1U) << 16);
-    desc[4] = (unsigned int)buffer; desc[6] = bytes; desc[7] = 1 | (write ? 0 : 2) | (2U << 16);
-    desc[8] = (unsigned int)&v->status; desc[10] = 1; desc[11] = 2;
+    desc[0] = (unsigned int)(uintptr_t)v->request; desc[2] = 16; desc[3] = 1 | ((flush ? 2U : 1U) << 16);
+    desc[4] = (unsigned int)(uintptr_t)buffer; desc[6] = bytes; desc[7] = 1 | (write ? 0 : 2) | (2U << 16);
+    desc[8] = (unsigned int)(uintptr_t)&v->status; desc[10] = 1; desc[11] = 2;
     available[2 + v->available % v->size] = 0;
     barrier(); available[1] = ++v->available; barrier();
-    if (v->modern) *(volatile unsigned short *)v->notify = 0; else out16(v->io + 16, 0);
+    if (v->modern) *(volatile unsigned short *)(uintptr_t)v->notify = 0; else out16(v->io + 16, 0);
     for (unsigned int i = 0; i < WAIT_LIMIT; i++) {
         if (used[1] == v->used) continue;
         barrier(); v->used = used[1]; return v->status == 0 ? 0 : -1;
@@ -477,26 +477,26 @@ static void virtio_init(unsigned int pci)
         mmwrite(v->common, 0, 1); if (!(mmread(v->common, 4) & 1)) return;
         mmwrite(v->common, 8, 0); mmwrite(v->common, 12, features & (1U << 9)); /* FLUSH */
         mmwrite(v->common, 8, 1); mmwrite(v->common, 12, 1); /* VERSION_1 */
-        vstatus(v, 11); if (!(*(volatile unsigned char *)(v->common + 20) & 8)) return;
-        *(volatile unsigned short *)(v->common + 22) = 0;
-        v->size = *(volatile unsigned short *)(v->common + 24);
+        vstatus(v, 11); if (!(*(volatile unsigned char *)(uintptr_t)(v->common + 20) & 8)) return;
+        *(volatile unsigned short *)(uintptr_t)(v->common + 22) = 0;
+        v->size = *(volatile unsigned short *)(uintptr_t)(v->common + 24);
         if (v->size > 128) v->size = 128;
         if (v->size < 3 || (v->size & (v->size - 1))) return;
-        *(volatile unsigned short *)(v->common + 24) = v->size;
-        *(volatile unsigned short *)(v->common + 26) = 0xffff;
+        *(volatile unsigned short *)(uintptr_t)(v->common + 24) = v->size;
+        *(volatile unsigned short *)(uintptr_t)(v->common + 26) = 0xffff;
         mmaddress(v->common, 32, v->ring);
         mmaddress(v->common, 40, v->ring + v->size * 16);
         mmaddress(v->common, 48, v->ring + ((v->size * 18 + 6 + 4095) & ~4095U));
-        v->notify += *(volatile unsigned short *)(v->common + 30) * v->notify_multiplier;
+        v->notify += *(volatile unsigned short *)(uintptr_t)(v->common + 30) * v->notify_multiplier;
         if (linux_memory_map_mmio(v->notify, 2)) return;
-        *(volatile unsigned short *)(v->common + 28) = 1;
+        *(volatile unsigned short *)(uintptr_t)(v->common + 28) = 1;
         capacity = mmread(v->config, 0) | ((uint64_t)mmread(v->config, 4) << 32);
         vstatus(v, 15);
     } else {
         features = in32(v->io); out32(v->io + 4, features & (1U << 9));
         out16(v->io + 14, 0); v->size = in16(v->io + 12);
         if (v->size < 3 || v->size > 256 || (v->size & (v->size - 1))) return;
-        out32(v->io + 8, (unsigned int)v->ring >> 12);
+        out32(v->io + 8, (unsigned int)(uintptr_t)v->ring >> 12);
         capacity = in32(v->io + 20) | ((uint64_t)in32(v->io + 24) << 32);
         vstatus(v, 7);
     }
@@ -535,7 +535,7 @@ static int native_io(Device *d, unsigned int lba, void *data, unsigned int count
     /* PRP1 must be dword aligned and covers only up to the end of its page;
      * the rest of a buffer that crosses a page goes in PRP2 (count <= 8, so
      * at most two pages). Misaligned buffers go through the bounce page. */
-    unsigned int address = (unsigned int)data, bytes = count << d->sector_shift;
+    unsigned int address = (unsigned int)(uintptr_t)data, bytes = count << d->sector_shift;
     if ((address & 3) && data != bounce) {
         if (write) memcpy(bounce, data, bytes);
         if (native_io(d, lba, bounce, count, write)) return -1;

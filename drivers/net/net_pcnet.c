@@ -1,5 +1,6 @@
 /* AMD PCnet-PCI (Am79C970A and relatives, QEMU and VirtualBox): 32-bit
  * I/O, software style 2 descriptors, polled. */
+#include <stdint.h>
 #include "net_driver.h"
 #include "barnix.h"
 
@@ -27,7 +28,7 @@ static int send(const void *frame, unsigned int length)
     if (d->flags & (1U << 31)) return -1;
     memcpy(txb[tx_at], frame, length);
     if (length < 60) { memset(txb[tx_at] + length, 0, 60 - length); length = 60; }
-    d->address = (unsigned int)txb[tx_at]; d->misc = 0;
+    d->address = (unsigned int)(uintptr_t)txb[tx_at]; d->misc = 0;
     __asm__ volatile("" ::: "memory");
     d->flags = (1U << 31) | (1U << 25) | (1U << 24) | 0xf000 | ((-(int)length) & 0xfff);
     tx_at = (tx_at + 1) % COUNT;
@@ -73,7 +74,7 @@ int pcnet_probe(unsigned int pci, unsigned int id, NetDriver *driver)
     out32(0x10, 0);                                                  /* switch to 32-bit I/O */
     bcr(20, 2);                                                      /* software style 2 */
     for (int i = 0; i < COUNT; i++) {
-        rx[i].address = (unsigned int)rxb[i]; rx[i].misc = 0;
+        rx[i].address = (unsigned int)(uintptr_t)rxb[i]; rx[i].misc = 0;
         rx[i].flags = (1U << 31) | 0xf000 | ((-(int)sizeof(rxb[0])) & 0xfff);
         tx[i].address = 0; tx[i].flags = 0; tx[i].misc = 0;
     }
@@ -81,8 +82,8 @@ int pcnet_probe(unsigned int pci, unsigned int id, NetDriver *driver)
     memset(&init, 0, sizeof(init));
     init.rlen = 4 << 4; init.tlen = 4 << 4;                          /* 16 entries each */
     memcpy(init.mac, driver->mac, 6);
-    init.rx = (unsigned int)rx; init.tx = (unsigned int)tx;
-    csr(1, (unsigned int)&init & 0xffff); csr(2, (unsigned int)&init >> 16);
+    init.rx = (unsigned int)(uintptr_t)rx; init.tx = (unsigned int)(uintptr_t)tx;
+    csr(1, (unsigned int)(uintptr_t)&init & 0xffff); csr(2, (unsigned int)(uintptr_t)&init >> 16);
     csr(4, csr_read(4) | 0x0800);                                    /* pad short frames */
     csr(0, 0x0001);                                                  /* initialize */
     for (int i = 0; i < 100 && !(csr_read(0) & 0x0100); i++) net_delay_ms(1);

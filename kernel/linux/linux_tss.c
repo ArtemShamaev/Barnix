@@ -25,7 +25,7 @@ void linux_tss_tls_set(uint64_t descriptor) { gdt_tls_descriptor = descriptor; }
 int linux_tss_set_thread_area(unsigned int address)
 {
     if (!linux_user_range(address, 16)) return -14; /* EFAULT */
-    uint32_t *user = (uint32_t *)address;
+    uint32_t *user = (uint32_t *)(uintptr_t)address;
     uint32_t entry = user[0], base = user[1], limit = user[2], flags = user[3];
     if (entry != 0xffffffffU && entry != 6) return -22;
     if (flags & ~0x7fU) return -22;
@@ -53,11 +53,11 @@ void linux_tss_init(void)
     static int initialized;
     if (initialized) return;
     gdt_tls_descriptor = 0;
-    uint32_t base = (uint32_t)&tss, limit = sizeof(tss) - 1;
+    uint32_t base = (uint32_t)(uintptr_t)&tss, limit = sizeof(tss) - 1;
     gdt_tss_descriptor = (uint64_t)limit | ((uint64_t)(base & 0xFFFFFF) << 16) |
         ((uint64_t)0x89 << 40) | ((uint64_t)(base >> 24) << 56);
     tss.ss0 = 0x10;
-    tss.esp0 = (uint32_t)(syscall_stack + sizeof(syscall_stack));
+    tss.esp0 = (uint32_t)(uintptr_t)(syscall_stack + sizeof(syscall_stack));
     tss.iomap = sizeof(tss); /* No user I/O permissions. */
     __asm__ volatile("ltr %%ax" : : "a"((uint16_t)0x28) : "memory");
     initialized = 1;

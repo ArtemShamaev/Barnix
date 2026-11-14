@@ -121,9 +121,9 @@ static int prepare_live(const MultibootInfo *info)
 {
     if (!(info->flags & MULTIBOOT_MODULES) || !info->module_count || !info->modules)
         return -1;
-    const MultibootModule *module = (const MultibootModule *)info->modules;
+    const MultibootModule *module = (const MultibootModule *)(uintptr_t)info->modules;
     if (module->end <= module->start ||
-        disk_init_from_memory((void *)module->start, module->end - module->start))
+        disk_init_from_memory((void *)(uintptr_t)module->start, module->end - module->start))
         return -1;
     return 0;
 }
@@ -223,7 +223,7 @@ void kernel_main(unsigned int magic, const MultibootInfo *info)
         panic(tr("Multiboot boot information missing"));
 
     int live_only = (info->flags & MULTIBOOT_CMDLINE) && info->command_line &&
-                    strcmp((const char *)info->command_line, "live") == 0;
+                    strcmp((const char *)(uintptr_t)info->command_line, "live") == 0;
     #ifdef BARNIX_SETUP
     live_only = 1;
     #endif
@@ -233,7 +233,7 @@ void kernel_main(unsigned int magic, const MultibootInfo *info)
     boot_complete("Live filesystem");
     const char *root_uuid = NULL;
     if ((info->flags & MULTIBOOT_CMDLINE) && info->command_line)
-        root_uuid = strstr((const char *)info->command_line, "root_uuid=");
+        root_uuid = strstr((const char *)(uintptr_t)info->command_line, "root_uuid=");
     int ready = !live_only && (root_uuid ? select_boot_uuid(root_uuid + 10) : disk_init()) == 0 && fs_init() == 0;
     if (!live_only && root_uuid && !ready) panic("Installed root UUID not found or filesystem damaged");
     if (!ready)

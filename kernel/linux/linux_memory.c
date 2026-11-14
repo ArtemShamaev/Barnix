@@ -89,14 +89,14 @@ unsigned int linux_memory_arena_size(unsigned int base)
 void linux_memory_enter(unsigned int base, unsigned int image_end)
 {
     unsigned int arena_size = linux_memory_arena_size(base);
-    unsigned int physical = (unsigned int)linux_memory_physical_base(base);
+    unsigned int physical = (unsigned int)(uintptr_t)linux_memory_physical_base(base);
     user_base = base; user_top = base + arena_size;
     heap_base = heap_break = (image_end + 4095U) & ~4095U;
     memset(read_only, 0, sizeof(read_only));
     memset(mmap_pages, 0, sizeof(mmap_pages));
     memset(directory, 0, sizeof(directory));
     for (unsigned int i = 0; i < KERNEL_RAM_TABLES; i++) {
-        directory[i] = (uint32_t)tables[i] | 7U;
+        directory[i] = (uint32_t)(uintptr_t)tables[i] | 7U;
         for (unsigned int j = 0; j < 1024; j++) {
             uint32_t address = (i * 1024 + j) * 4096U;
             uint32_t flags = 3U;
@@ -107,17 +107,17 @@ void linux_memory_enter(unsigned int base, unsigned int image_end)
         for (unsigned int page = 0; page < arena_size / 4096U; page++)
             large_user_tables[page >> 10][page & 1023] = (physical + page * 4096U) | 7U;
         for (unsigned int i = 0; i < arena_size / 0x400000U; i++)
-            directory[(base >> 22) + i] = (uint32_t)large_user_tables[i] | 7U;
+            directory[(base >> 22) + i] = (uint32_t)(uintptr_t)large_user_tables[i] | 7U;
     } else {
         for (unsigned int i = 0; i < 1024; i++)
             user_table[i] = (APP_LOAD_MIN + i * 4096U) | 7U;
-        directory[base >> 22] = (uint32_t)user_table | 7U;
+        directory[base >> 22] = (uint32_t)(uintptr_t)user_table | 7U;
     }
     for (unsigned int i = 0; i < mmio_count; i++)
-        directory[mmio_indices[i]] = (uint32_t)mmio_tables[i] | 3U;
+        directory[mmio_indices[i]] = (uint32_t)(uintptr_t)mmio_tables[i] | 3U;
     __asm__ volatile("mov %%cr0, %0; mov %%cr3, %1" : "=r"(saved_cr0), "=r"(saved_cr3));
     __asm__ volatile("mov %0, %%cr3; mov %1, %%cr0" : :
-        "r"((uint32_t)directory), "r"(saved_cr0 | 0x80000000U) : "memory");
+        "r"((uint32_t)(uintptr_t)directory), "r"(saved_cr0 | 0x80000000U) : "memory");
 }
 void linux_memory_leave(void)
 {
@@ -133,7 +133,7 @@ unsigned int linux_memory_brk(unsigned int requested)
         if (mmap_used(page) && user_base + page * 4096U < max_break)
             max_break = user_base + page * 4096U;
     if (requested >= heap_base && requested <= max_break) {
-        if (requested > heap_break) memset((void *)heap_break, 0, requested - heap_break);
+        if (requested > heap_break) memset((void *)(uintptr_t)heap_break, 0, requested - heap_break);
         heap_break = requested;
     }
     return heap_break;
@@ -153,7 +153,7 @@ int linux_memory_map(unsigned int size, unsigned int protection)
         for (; page < end; page++) if (mmap_used(page)) break;
         if (page != end) continue;
         unsigned int result = user_base + first * 4096U;
-        memset((void *)result, 0, count * 4096U);
+        memset((void *)(uintptr_t)result, 0, count * 4096U);
         for (page = first; page < end; page++) mmap_set(page, 1);
         if (!(protection & 2U)) linux_memory_protect(result, count * 4096U, protection | 1U);
         return (int)result;
@@ -170,7 +170,7 @@ int linux_memory_unmap(unsigned int address, unsigned int size)
         if (!mmap_used(page)) return -22;
     }
     linux_memory_protect(address, count * 4096U, 3);
-    memset((void *)address, 0, count * 4096U);
+    memset((void *)(uintptr_t)address, 0, count * 4096U);
     for (unsigned int page = first; page < first + count; page++) mmap_set(page, 0);
     return 0;
 }
@@ -214,5 +214,5 @@ void linux_memory_resume(const LinuxMemoryState *state)
     unsigned int pages = linux_memory_arena_size(state->base) >> 12;
     for (unsigned int page = 0; page < pages; page++)
         if (read_only[page >> 3] & (1U << (page & 7))) *user_page_table(page) &= ~2U;
-    __asm__ volatile("mov %0, %%cr3" : : "r"((uint32_t)directory) : "memory");
+    __asm__ volatile("mov %0, %%cr3" : : "r"((uint32_t)(uintptr_t)directory) : "memory");
 }
