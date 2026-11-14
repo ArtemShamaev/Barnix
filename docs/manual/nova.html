@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>Язык Nova</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<header><h1>Язык Nova</h1><p>Статически типизированный язык для JVM: блоки отступами, объявления как в C#</p></header>
+<nav><a href="index.html">Главная</a><a href="c.html">C</a><a href="cpp.html">C++</a><a href="python.html">Python</a><a href="nova.html">Nova</a><a href="java.html">Java</a><a href="web.html">HTML/CSS/JS</a><a href="barnix.html">Barnix API</a><a href="shell.html">Оболочка и brm</a></nav>
+<main>
+<pre><code>int fib(int n):
+    if n &lt; 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
+
+void main():
+    var name = "World"
+    print("Hello, " + name + "!")
+    for i in 0..10:
+        print("fib(" + i + ") = " + fib(i))</code></pre>
+
+<h2>Сборка и запуск</h2>
+<p>Компилятор Nova сам работает на JDK 21, поэтому <b>собирают на компьютере разработчика</b>:</p>
+<pre><code>./nova build hello.nova -o hello.jar   # на Linux/Windows с JDK 21
+</code></pre>
+<p>Готовый JAR запускается в Barnix виртуальной машиной BJVM:</p>
+<pre><code>java -jar hello.jar
+nova run /usr/share/nova/examples/hello.jar   # примеры</code></pre>
+<p>В Barnix Code можно писать <code>.nova</code>-файлы; F5 запускает собранный рядом <code>.jar</code>.</p>
+
+<h2>Типы</h2>
+<table>
+<tr><th>Nova</th><th>JVM</th><th>Примечание</th></tr>
+<tr><td><code>int</code></td><td><code>int</code></td><td>32 бита</td></tr>
+<tr><td><code>double</code></td><td><code>double</code></td><td><code>int</code> расширяется до <code>double</code> сам</td></tr>
+<tr><td><code>bool</code></td><td><code>boolean</code></td><td><code>true</code> / <code>false</code></td></tr>
+<tr><td><code>string</code></td><td><code>String</code></td><td><code>==</code> сравнивает значения</td></tr>
+<tr><td><code>T[]</code></td><td>массив</td><td><code>new int[10]</code>, <code>[1, 2, 3]</code>, <code>a.length</code></td></tr>
+<tr><td>класс</td><td>класс JVM</td><td><code>null</code> только для ссылочных типов</td></tr>
+</table>
+<p>Неявно: только <code>int → double</code> и «подкласс → базовый класс». Обратно — <code>toInt(x)</code>.</p>
+
+<h2>Переменные</h2>
+<pre><code>var count = 0           // тип выводится: int
+string title = "Nova"
+double[] xs = [1, 2.5]
+Shape s = null
+int x                   // значение по умолчанию: 0 / false / null</code></pre>
+
+<h2>Управление</h2>
+<pre><code>if x &gt; 10:
+    print("много")
+elif x &gt; 0:
+    print("немного")
+else:
+    print("ничего")
+
+while i &lt; n:
+    i += 1
+for i in 0..n:          // 0 … n-1
+    pass
+for item in array:
+    print(item)</code></pre>
+<p><code>break</code>, <code>continue</code>, <code>pass</code>, <code>return</code>; логика — <code>and</code>, <code>or</code>, <code>not</code>.</p>
+
+<h2>Классы</h2>
+<pre><code>class Shape:
+    string name
+
+    init(string name):
+        this.name = name
+
+    double area():
+        return 0.0
+
+class Circle(Shape):
+    double r
+
+    init(double r):
+        super("круг")
+        this.r = r
+
+    double area():
+        return 3.14159 * r * r</code></pre>
+
+<h2>Строки</h2>
+<p>Доступны все методы <code>java.lang.String</code>: <code>trim()</code>, <code>toUpperCase()</code>,
+<code>split(", ")</code>, <code>contains()</code>, <code>charAt()</code>, <code>length()</code>.</p>
+</main></body></html>

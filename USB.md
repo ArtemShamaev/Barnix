@@ -26,6 +26,10 @@ found. There is one active class interface per physical device; USB keyboards,
 multiple simultaneous class interfaces on one composite device, vendor-specific
 mouse configuration, touch gestures and other USB classes are not implemented.
 
+The shared PS/2 pointer path negotiates standard IntelliMouse wheel mode (ID 3)
+and Explorer side buttons (ID 4); devices that do not respond retain the
+three-byte, three-button packet format.
+
 ## Hardware behavior
 
 - PCI discovery covers all buses and multifunction devices. Firmware ownership

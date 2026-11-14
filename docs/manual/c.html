@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>Язык C в Barnix</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<header><h1>Язык C</h1><p>GCC 16.2 и glibc в Barnix</p></header>
+<nav><a href="index.html">Главная</a><a href="c.html">C</a><a href="cpp.html">C++</a><a href="python.html">Python</a><a href="nova.html">Nova</a><a href="java.html">Java</a><a href="web.html">HTML/CSS/JS</a><a href="barnix.html">Barnix API</a><a href="shell.html">Оболочка и brm</a></nav>
+<main>
+<h2>Установка</h2>
+<p>GCC — это пакет <code>gcc</code> (около 60 МБ скачивания, 180 МБ на диске). Установите его в <b>BarnStore</b>
+или командой <code>sudo brm -S gcc</code>. Нужен установленный Barnix (не Live CD) и от 1,5 ГБ памяти.</p>
+
+<h2>Первая программа</h2>
+<pre><code>#include &lt;stdio.h&gt;
+
+int main(void)
+{
+    printf("Привет, Barnix!\n");
+    return 0;
+}</code></pre>
+<p>В <b>Barnix Code</b>: сохраните файл как <code>hello.c</code> и нажмите <b>F5</b> — он соберётся и запустится в терминале внизу.
+В Gouse Prompt или в оболочке:</p>
+<pre><code>gcc hello.c -o hello
+./hello</code></pre>
+<div class="note">Программы собираются статически (<code>-static</code> добавляется сам): в Barnix нет
+динамического загрузчика. Готовая программа — обычный ELF для Linux i386, Barnix запускает его сам.</div>
+
+<h2>Полезные ключи GCC</h2>
+<table>
+<tr><th>Ключ</th><th>Что делает</th></tr>
+<tr><td><code>-o имя</code></td><td>имя готовой программы</td></tr>
+<tr><td><code>-Wall -Wextra</code></td><td>больше предупреждений — ловит ошибки</td></tr>
+<tr><td><code>-O2</code></td><td>оптимизация: программа быстрее, сборка дольше</td></tr>
+<tr><td><code>-g</code></td><td>отладочная информация</td></tr>
+<tr><td><code>-std=c17</code>, <code>-std=c23</code></td><td>версия стандарта</td></tr>
+<tr><td><code>-lm</code></td><td>подключить математику (<code>sqrt</code>, <code>sin</code>…)</td></tr>
+<tr><td><code>-c</code></td><td>только скомпилировать в <code>.o</code>, без сборки</td></tr>
+</table>
+
+<h2>Типы</h2>
+<table>
+<tr><th>Тип</th><th>Размер</th><th>Пример</th></tr>
+<tr><td><code>char</code></td><td>1 байт</td><td><code>char c = 'A';</code></td></tr>
+<tr><td><code>int</code></td><td>4 байта</td><td><code>int n = -5;</code></td></tr>
+<tr><td><code>long</code></td><td>4 байта (i386)</td><td><code>long big = 100000L;</code></td></tr>
+<tr><td><code>long long</code></td><td>8 байт</td><td><code>long long x = 1LL &lt;&lt; 40;</code></td></tr>
+<tr><td><code>float</code>, <code>double</code></td><td>4 и 8 байт</td><td><code>double pi = 3.14159;</code></td></tr>
+<tr><td><code>bool</code> (<code>&lt;stdbool.h&gt;</code>)</td><td>1 байт</td><td><code>bool ok = true;</code></td></tr>
+<tr><td>указатель</td><td>4 байта</td><td><code>int *p = &amp;n;</code></td></tr>
+</table>
+
+<h2>Управление</h2>
+<pre><code>if (x &gt; 0) { ... } else if (x == 0) { ... } else { ... }
+
+for (int i = 0; i &lt; 10; i++) { ... }
+while (running) { ... }
+do { ... } while (again);
+
+switch (key) {
+case 'q': quit(); break;
+default:  break;
+}</code></pre>
+
+<h2>Функции, массивы, строки</h2>
+<pre><code>int square(int x) { return x * x; }
+
+int numbers[5] = {1, 2, 3, 4, 5};
+char name[32] = "Гусь";          // строка — массив char с нулём в конце
+size_t n = strlen(name);          // байты: кириллица занимает по 2
+
+void fill(int *a, int count) { for (int i = 0; i &lt; count; i++) a[i] = i; }</code></pre>
+
+<h2>Структуры и память</h2>
+<pre><code>#include &lt;stdlib.h&gt;
+struct point { int x, y; };
+
+struct point *p = malloc(sizeof *p);
+if (!p) return 1;
+p-&gt;x = 10; p-&gt;y = 20;
+free(p);</code></pre>
+
+<h2>Ввод и вывод</h2>
+<pre><code>int age;
+printf("Сколько лет? ");
+if (scanf("%d", &amp;age) == 1) printf("Через год: %d\n", age + 1);
+
+char line[100];
+fgets(line, sizeof line, stdin);   // целая строка</code></pre>
+<p>Ввод с клавиатуры идёт строками: текст виден по мере набора, Backspace стирает,
+<b>Ctrl+V</b> вставляет из буфера обмена, Enter отправляет строку программе.</p>
+
+<h2>Файлы</h2>
+<pre><code>FILE *f = fopen("notes.txt", "w");
+if (!f) { perror("notes.txt"); return 1; }
+fprintf(f, "строка %d\n", 1);
+fclose(f);
+
+f = fopen("notes.txt", "r");
+char buffer[256];
+while (fgets(buffer, sizeof buffer, f)) printf("%s", buffer);
+fclose(f);</code></pre>
+<p>Обычный пользователь пишет в свою папку <code>/home/ИМЯ</code> и в <code>/tmp</code>; системные папки — только root.</p>
+
+<h2>Стандартная библиотека: шпаргалка</h2>
+<table>
+<tr><th>Заголовок</th><th>Главное</th></tr>
+<tr><td><code>stdio.h</code></td><td><code>printf scanf puts fgets fopen fread fwrite fclose snprintf</code></td></tr>
+<tr><td><code>stdlib.h</code></td><td><code>malloc calloc realloc free atoi strtol qsort rand srand exit</code></td></tr>
+<tr><td><code>string.h</code></td><td><code>strlen strcpy strncpy strcat strcmp strchr strstr memcpy memset</code></td></tr>
+<tr><td><code>ctype.h</code></td><td><code>isdigit isalpha isspace toupper tolower</code></td></tr>
+<tr><td><code>math.h</code> (+<code>-lm</code>)</td><td><code>sqrt pow sin cos tan atan2 floor ceil fabs</code></td></tr>
+<tr><td><code>time.h</code></td><td><code>time clock</code></td></tr>
+<tr><td><code>stdint.h</code></td><td><code>int8_t … uint64_t</code></td></tr>
+</table>
+
+<h2>Что пока не работает</h2>
+<ul>
+<li>динамические библиотеки (<code>.so</code>) и <code>dlopen</code>;</li>
+<li>потоки работают ограниченно, сети через сокеты Linux нет (для сети и графики — <a href="barnix.html">Barnix API</a>);</li>
+<li>одновременно живут до 3 процессов (<code>fork</code>, <code>system</code>).</li>
+</ul>
+<p>Окно, графика и звук в C — это <a href="barnix.html">нативные программы Barnix (BDK)</a>.</p>
+</main></body></html>

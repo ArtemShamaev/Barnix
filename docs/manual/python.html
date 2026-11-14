@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>Python в Barnix</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<header><h1>Python</h1><p>Python 3.9 и его стандартная библиотека в Barnix</p></header>
+<nav><a href="index.html">Главная</a><a href="c.html">C</a><a href="cpp.html">C++</a><a href="python.html">Python</a><a href="nova.html">Nova</a><a href="java.html">Java</a><a href="web.html">HTML/CSS/JS</a><a href="barnix.html">Barnix API</a><a href="shell.html">Оболочка и brm</a></nav>
+<main>
+<p>Python — пакет <code>python</code>: <b>BarnStore</b> или <code>sudo brm -S python</code>. Программы пишутся
+в <b>Barnix Code</b> (F5 — отладчик с точками останова, Ctrl+F5 — простой запуск; вывод и ошибки — в нижней панели; подсказки по Ctrl+Space) или в любом редакторе.</p>
+<pre><code>python3 hello.py        # запустить программу
+python3                 # интерактивный режим, выход: exit()
+python3 -c "print(2**100)"</code></pre>
+
+<h2>Первая программа</h2>
+<pre><code>name = input("Как тебя зовут? ")
+print(f"Привет, {name}!")
+for i in range(1, 6):
+    print(i, "в квадрате =", i * i)</code></pre>
+
+<h2>Основы</h2>
+<pre><code>numbers = [5, 3, 8, 1]
+numbers.sort()
+squares = [n * n for n in numbers]
+age = {"Гусь": 3, "Утка": 2}
+for name, years in age.items():
+    print(name, years)
+
+def fib(n):
+    return n if n &lt; 2 else fib(n - 1) + fib(n - 2)
+
+class Goose:
+    def __init__(self, name):
+        self.name = name
+    def honk(self):
+        return f"{self.name}: Га-га!"</code></pre>
+
+<h2>Файлы</h2>
+<pre><code>with open("notes.txt", "w") as f:
+    f.write("строка\n")
+with open("notes.txt") as f:
+    for line in f:
+        print(line.strip())</code></pre>
+<p>Обычный пользователь пишет в свою папку и в <code>/tmp</code>.</p>
+
+<h2>Что есть из стандартной библиотеки</h2>
+<table>
+<tr><td><code>math</code>, <code>cmath</code>, <code>random</code>, <code>statistics</code>, <code>decimal</code>, <code>fractions</code></td><td>математика</td></tr>
+<tr><td><code>json</code>, <code>csv</code>, <code>pickle</code>, <code>xml.etree</code></td><td>форматы данных</td></tr>
+<tr><td><code>datetime</code>, <code>time</code>, <code>zoneinfo</code></td><td>время</td></tr>
+<tr><td><code>os</code>, <code>pathlib</code>, <code>shutil</code>, <code>glob</code>, <code>tempfile</code></td><td>файлы и папки</td></tr>
+<tr><td><code>collections</code>, <code>itertools</code>, <code>functools</code>, <code>heapq</code>, <code>bisect</code></td><td>структуры данных</td></tr>
+<tr><td><code>re</code>, <code>string</code>, <code>textwrap</code>, <code>unicodedata</code></td><td>текст</td></tr>
+<tr><td><code>hashlib</code>, <code>base64</code>, <code>binascii</code></td><td>хеши и кодировки</td></tr>
+</table>
+
+<h2>Чего пока нет</h2>
+<ul><li>сети (<code>socket</code>, <code>urllib</code> к интернету), потоков, <code>sqlite3</code>, <code>tkinter</code>, <code>ctypes</code>;</li>
+<li>сжатия <code>zlib</code>/<code>gzip</code>; установки пакетов через <code>pip</code>.</li></ul>
+</main></body></html>

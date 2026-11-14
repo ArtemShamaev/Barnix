@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>Язык C++ в Barnix</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<header><h1>Язык C++</h1><p>G++ 16.2 и libstdc++ в Barnix</p></header>
+<nav><a href="index.html">Главная</a><a href="c.html">C</a><a href="cpp.html">C++</a><a href="python.html">Python</a><a href="nova.html">Nova</a><a href="java.html">Java</a><a href="web.html">HTML/CSS/JS</a><a href="barnix.html">Barnix API</a><a href="shell.html">Оболочка и brm</a></nav>
+<main>
+<p>G++ входит в пакет <code>gcc</code> (<b>BarnStore</b> или <code>sudo brm -S gcc</code>). Файлы C++ — <code>.cpp</code>, <code>.cc</code>, <code>.cxx</code>;
+Barnix Code выбирает G++ по расширению сам.</p>
+
+<h2>Первая программа</h2>
+<pre><code>#include &lt;iostream&gt;
+#include &lt;string&gt;
+
+int main()
+{
+    std::string name;
+    std::cout &lt;&lt; "Как тебя зовут? ";
+    std::getline(std::cin, name);
+    std::cout &lt;&lt; "Привет, " &lt;&lt; name &lt;&lt; "!\n";
+}</code></pre>
+<pre><code>g++ -std=c++23 -O2 hello.cpp -o hello
+./hello</code></pre>
+<div class="note">Сборка C++ заметно дольше, чем C: <code>cc1plus</code> — большая программа. Не пугайтесь паузы в полминуты.</div>
+
+<h2>Классы</h2>
+<pre><code>class Shape {
+public:
+    virtual ~Shape() = default;
+    virtual double area() const = 0;
+};
+
+class Circle : public Shape {
+    double r;
+public:
+    explicit Circle(double radius) : r(radius) {}
+    double area() const override { return 3.14159 * r * r; }
+};
+
+#include &lt;memory&gt;
+std::unique_ptr&lt;Shape&gt; s = std::make_unique&lt;Circle&gt;(2.0);</code></pre>
+
+<h2>Контейнеры</h2>
+<pre><code>#include &lt;vector&gt;
+#include &lt;map&gt;
+#include &lt;algorithm&gt;
+
+std::vector&lt;int&gt; v = {5, 3, 8, 1};
+v.push_back(7);
+std::sort(v.begin(), v.end());
+for (int x : v) std::cout &lt;&lt; x &lt;&lt; ' ';
+
+std::map&lt;std::string, int&gt; age;
+age["Гусь"] = 3;
+if (auto it = age.find("Гусь"); it != age.end()) std::cout &lt;&lt; it-&gt;second;</code></pre>
+<table>
+<tr><th>Контейнер</th><th>Когда</th></tr>
+<tr><td><code>vector</code></td><td>массив, растущий в конце — по умолчанию</td></tr>
+<tr><td><code>string</code></td><td>строки (байты UTF-8)</td></tr>
+<tr><td><code>map</code>, <code>unordered_map</code></td><td>словарь ключ → значение</td></tr>
+<tr><td><code>set</code>, <code>unordered_set</code></td><td>множество без повторов</td></tr>
+<tr><td><code>deque</code>, <code>list</code></td><td>вставка в начало и середину</td></tr>
+<tr><td><code>array</code></td><td>массив фиксированного размера</td></tr>
+</table>
+
+<h2>Лямбды и алгоритмы</h2>
+<pre><code>auto even = [](int x) { return x % 2 == 0; };
+int count = std::count_if(v.begin(), v.end(), even);
+std::transform(v.begin(), v.end(), v.begin(), [](int x) { return x * 2; });
+int sum = std::accumulate(v.begin(), v.end(), 0);   // &lt;numeric&gt;</code></pre>
+
+<h2>Файлы</h2>
+<pre><code>#include &lt;fstream&gt;
+std::ofstream out("scores.txt");
+out &lt;&lt; "рекорд " &lt;&lt; 100 &lt;&lt; '\n';
+out.close();
+
+std::ifstream in("scores.txt");
+for (std::string line; std::getline(in, line); ) std::cout &lt;&lt; line &lt;&lt; '\n';</code></pre>
+
+<h2>Шаблоны</h2>
+<pre><code>template &lt;typename T&gt;
+T biggest(const std::vector&lt;T&gt; &amp;items) { return *std::max_element(items.begin(), items.end()); }</code></pre>
+
+<h2>Исключения</h2>
+<pre><code>try {
+    int n = std::stoi("не число");
+} catch (const std::exception &amp;e) {
+    std::cerr &lt;&lt; "ошибка: " &lt;&lt; e.what() &lt;&lt; '\n';
+}</code></pre>
+<p>Ограничения те же, что и у <a href="c.html">C</a>: статическая сборка, без <code>.so</code> и сетевых сокетов Linux.</p>
+</main></body></html>

@@ -1,0 +1,19 @@
+body{font-family:sans-serif;margin:0;background:#f4f6fa;color:#1c2430;line-height:1.45}
+header{background:linear-gradient(to right,#1f4fa8,#4a8ee6);color:#fff;padding:18px 24px}
+header h1{margin:0;font-size:26px}header p{margin:4px 0 0;opacity:.9}
+header a{color:#fff}
+nav{background:#dfe7f3;padding:6px 24px;font-size:14px}
+nav a{margin-right:14px;color:#1f4fa8;text-decoration:none}
+main{max-width:860px;margin:0 auto;padding:8px 24px 32px}
+h2{font-size:20px;margin:26px 0 8px;color:#1f4fa8;border-bottom:1px solid #cdd6e4;padding-bottom:3px}
+h3{font-size:16px;margin:18px 0 6px}
+pre{background:#1d2330;color:#e6edf6;padding:10px 12px;border-radius:6px;overflow:auto;font-size:13px}
+code{background:#dde5f2;padding:1px 4px;border-radius:3px;font-size:13px}
+pre code{background:none;padding:0}
+table{border-collapse:collapse;margin:8px 0;font-size:14px}
+td,th{border:1px solid #cdd6e4;padding:4px 8px;text-align:left;vertical-align:top}
+th{background:#e7edf7}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin:12px 0}
+.tile{display:block;background:#fff;border:1px solid #cdd6e4;border-radius:10px;padding:12px 14px;text-decoration:none;color:#1c2430}
+.tile b{display:block;color:#1f4fa8;font-size:17px;margin-bottom:4px}.tile span{font-size:13px;color:#5a6676}
+.note{background:#fff7d6;border:1px solid #e8d58a;border-radius:6px;padding:8px 12px;margin:10px 0}

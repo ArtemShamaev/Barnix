@@ -68,7 +68,7 @@ changes manually before running it again. See `--help` for usage.
 ## Boot from CD/DVD
 
 `make` builds **barnix.iso**, including GRUB, the kernel and a separate clean
-**live-ext2.img** containing all shell commands in `/bin`, plus `hello.elf` and `fileio.elf`. Burn the ISO **as a disc image** to CD-R/RW or DVD-R/RW and
+**live-ext2.img** containing all shell commands in `/usr/bin`, plus `hello.elf` and `fileio.elf`. Burn the ISO **as a disc image** to CD-R/RW or DVD-R/RW and
 select the optical drive in the computer's boot menu. This regular LiveCD uses BIOS/Legacy boot. For x64 UEFI use
 `barnix-efi-setup.iso`, built by `make setup`; its wizard also offers a live shell. The ISO uses GRUB's [bootable optical-disc support](https://www.gnu.org/software/grub/manual/grub/html_node/Making-a-GRUB-bootable-CD_002dROM.html).
 
@@ -198,25 +198,29 @@ stat program.dat
 `hello.elf` prints its arguments, checks initialized data and zero-initialized
 BSS, and returns status 7. `fileio.elf` writes and verifies a binary file of
 32768 bytes through the kernel API and returns 0. Both return to the shell.
-New live and USB images also contain copies under `/bin`. A bare command name
-is looked up there and loaded by the ELF loader, so `hello.elf argument` and
-`./bin/hello.elf argument` both execute the ELF file. Shell commands, including `help`, `cd`, `mount`, `init`, `macro` and `panic`, are
-separate ELF executables in `/bin` (without an `.elf` suffix). The shell has no
+New live and USB images also contain copies under `/usr/bin`. A bare command
+name is looked up in `/usr/bin`, then in `/bin`, and loaded by the ELF loader, so
+`hello.elf argument` and `/usr/bin/hello.elf argument` both execute the ELF file.
+Shell commands, including `help`, `cd`, `mount`, `init`, `macro` and `panic`, are
+separate ELF executables in `/usr/bin` (without an `.elf` suffix). `/bin` is kept
+for your own programs and old disks; an absolute `/bin/NAME` that does not exist
+runs `/usr/bin/NAME`, so old shortcuts and scripts keep working. The shell has no
 built-in command handlers. Absolute and relative executable paths also work.
 Ten basic commands now use Linux syscalls (see the ABI status above). Remaining
 commands use kernel filesystem/device services through the Barnix ABI;
 `cd` changes the shared working directory and persists after the program exits.
 The loader caches validated boot copies of `mount`, `unmount` and `devices`
 from the Live image so they remain executable after unmounting, device removal,
-or switching to an older filesystem without `/bin`. Other missing commands
+or switching to an older filesystem without `/usr/bin`. Other missing commands
 report an error; there is no built-in fallback.
 
 Existing persistent images are preserved. With QEMU stopped, run
-`make install-apps` to install/update `/bin` in `barnix-ext2.img`. Installation
+`make install-apps` to install/update `/usr/bin` in `barnix-ext2.img` (old copies
+in `/bin` are removed). Installation
 validates a temporary copy before replacing the image, preserving other files.
 For one custom program, use `make add-programm apps/calc.elf`; the target also
 builds `apps/calc.elf` from `apps/calc.c` when it is missing or stale. The
-program is installed as both `/bin/calc.elf` and `/calc.elf`, with executable
+program is installed as both `/usr/bin/calc.elf` and `/calc.elf`, with executable
 permissions. `make add-programm PROGRAM=apps/calc.elf` is an equivalent form.
 Back up important disk images before updating them. To update another offline
 image, use `python3 scripts/install_apps.py IMAGE apps/bin/* apps/hello.elf apps/fileio.elf`.
@@ -433,6 +437,15 @@ image as a USB Mass Storage device. Set another image with
 
 ## Tests
 
+### Nova on BJVM
+
+The Nova compiler supplied in `nova-lang.zip` is under `tools/nova`. Run
+`make nova nova-check` on the host to build Java 8 compatible JAR files and
+check the compiler. `make nova-image` adds the four source examples and their
+JAR files to the Live image. In Barnix, run an example with
+`java -jar /usr/share/nova/examples/hello.jar`. The compiler itself needs
+host JDK 21 and ASM; BJVM executes the generated programs.
+
 `make test` uses images created by `mke2fs`, imports Linux-side files through
 `debugfs`, runs the real filesystem code with a sector-device mock, checks
 exported contents, and runs `e2fsck -fn` after modifications. Tests cover both
@@ -484,10 +497,11 @@ and QEMU for `test-shell`.
 The launcher selects Linux ABI for supported System V/Linux ELF32 i386 files
 and legacy Barnix ABI for rebuilt files marked with standalone OSABI 255,
 version 7. Linux loading supports standard virtual addresses such as
-`0x08048000` within a bounded 4 MiB window. Dynamic linking, TLS, PIE and ELF64
-remain unsupported. See [the compatibility status](README-LINUX-REWRITE.md)
-for limits and tests. The migrated commands are freestanding Linux programs;
-ordinary Bash, GCC and coreutils binaries still need further kernel support.
+`0x08048000` within a bounded 4 MiB window, with a separate 256 MiB window for
+large static toolchain binaries at `0x80000000`. i386 TLS and static glibc are
+supported for single-threaded programs. Dynamic linking, PIE and ELF64 remain
+unsupported. See [the compatibility status](README-LINUX-REWRITE.md) for GCC
+image build commands, limits and tests.
 
 
 ### Additional disks and directory mounts
@@ -557,14 +571,20 @@ arguments keeps the general device/network listing.
 using OVMF. They use separate sparse `Setup/target.img` and
 `Setup/target-efi.img` destinations, created only when absent. The new targets
 hold a 5 GiB ext2 volume plus their boot area (1 MiB Legacy, 65 MiB EFI).
+`make run-setup-gcc FIRMWARE=efi` builds and boots the GCC-enabled UEFI LiveCD
+with 2 GiB RAM. At the welcome screen, Esc opens the Live shell, where `gcc`
+and `g++` run directly. In the installer, select the GCC C/C++ component to
+download it to the destination disk.
 After installation, `make run-installed FIRMWARE=efi` (or `make run FIRMWARE=efi`)
 boots the same `Setup/target-efi.img` without the installer CD. For Legacy use
 `make run-installed`. Both install and installed-boot commands accept
 `SETUP_DISK=disks/system.img`; use the same existing image for both commands.
 Disk-only boot never creates a missing destination. Plain `make run` retains
 its LiveCD behavior with `barnix-ext2.img`.
-Both wizards offer disk selection, three component profiles, language and hostname,
-confirmation, progress and installation that boots without the CD. See
+Both wizards offer disk selection, individual optional components, Ethernet or
+Wi-Fi setup, language and hostname, confirmation, progress and installation
+that boots without the CD. Optional packages are served by a local mirror at
+`http://10.0.2.2:8073` in QEMU; the repository URL can be changed in Setup. See
 [Setup/README.md](Setup/README.md) for builds, customization and current limits.
 
 ### PCI storage controllers
@@ -771,6 +791,61 @@ ABI 9 adds `getcwd`, `directory`, and deferred `launch` to `BarnixAPI`.
 it returns 1 for an entry, 0 at end, or a negative error. After a successful
 `launch(path)`, return 0 from main to perform the handoff. Requests from a
 launched child are rejected. ABI 7 and 8 programs remain loadable.
+
+ABI 10 adds true-color output and raw input for games: `present` shows an
+XRGB8888 frame (integer-scaled and centered), `display` reports the output
+size, `key_event` returns key presses, auto-repeats and releases, and `motion`
+returns unclamped mouse movement. UEFI draws to the GOP framebuffer; Legacy
+BIOS uses the Bochs/QEMU/VirtualBox VBE extension or VGA 320x200x256 and
+restores the text console when the program leaves graphics or exits. The BDK
+library `barnix_gfx.h` (BGX) wraps it; Barnocraft uses it. `memory` gives a
+program the free RAM above the GRUB modules (outside its 4 MiB arena), and
+files may be up to 640 KiB (ext2 doubly indirect blocks). ABI 9 programs
+remain loadable. Happy Gouse (`gouse`) is the windowed environment built on it;
+version 1.1 adds desktop shortcuts (`~/Desktop/*.desktop`) and Gouse Web, a
+browser for HTML5 and CSS3 with QuickJS JavaScript support (see NEW_APPS.md).
+
+`gldemo` shows Barnix OpenGL, the BDK software OpenGL 1.1 (`<GL/gl.h>`,
+`<GL/glu.h>` through `<barnix_opengl.h>`): a textured cube, a torus from a
+display list and a sphere under two moving lights with fog. It rasterizes on
+every core. Drag the mouse to orbit, wheel to zoom; W wireframe, L lights,
+F fog, T textures, Space pause, Esc quits. See BDK/README.md for the API.
+
+`glrunner` is an OpenGL endless runner included in the Live image and every
+installer profile. Start it from the shell with `glrunner`, or select
+**GL Runner** in the Gouse menu. Switch between three tracks with A/D or the
+left/right arrows, jump over barriers with W/up/Space, and slide under signs
+with S/down. Avoid trains, collect coins, and pick up a magnet or shield.
+Every 25 coins grant a hoverboard shield (H). P pauses; Esc quits. Mouse
+swipes also control movement, jumping and sliding. Gouse returns after the
+game closes and provides a desktop shortcut for new Gouse profiles. The best
+score is saved in the player's home directory. The city, rail bed and trains
+use small procedural OpenGL textures; the runner has animated limbs, lane
+lean, jump, slide and landing poses, with coin and crash particles.
+
+ABI 11 adds processor cores and sound: `cpus` and `parallel` run pure
+computation on every core (application processors are started at boot and
+sleep in `hlt` between jobs); `sound_device`, `sound_play`, `sound_stop`,
+`sound_playing` and `sound_volume` drive a 16-voice 48 kHz mixer on Intel HD
+Audio or AC'97, and `speaker` sounds the PC speaker. The BDK library
+`barnix_sound.h` (BSND) adds a synthesizer and a WAV reader; `play` and `beep`
+use it. ABI 7–10 programs remain loadable. `make run` uses KVM, all cores (up
+to 8), an SDL window that captures the mouse after a click, and sound when the
+host has them (`scripts/qemu_host.py`).
+
+Barnix, Happy Gouse, Barnocraft, Snake and Pong have sound effects: CC0 clips
+by Kenney (www.kenney.nl) in `sounds/` (see `sounds/LICENSE.txt`), embedded as
+mu-law by `scripts/sound_assets.py`. The shell chimes after login and sounds
+an error tone; `sounds off` silences it.
+
+ABI 12 adds networking: the kernel brings up wired Ethernet (Intel
+PRO/1000 and I21x, Realtek 8139/8111/8168, AMD PCnet) and Wi-Fi (WPA2;
+under QEMU the virtual card and network `Quemu-Password-root`, password
+`root`: `bnm connect Quemu-Password-root root`; `bnm off` disconnects
+everything) with DHCP, DNS and TCP, and programs call `net_open`/`net_send`/`net_recv`/`net_close`. The
+BDK library `barnix_net.h` adds HTTP and TLS 1.2/1.3 with certificate
+checking; `get` downloads over HTTPS, `git clone` fetches repositories and
+`bnm` shows the connection. ABI 7-11 programs remain loadable.
 
 Build with `make`; check desktop operations and native/Linux program return
 with `make test-execute`. The source is `apps/execute.c`.

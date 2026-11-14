@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>Barnix Code</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<header><h1>Barnix Code</h1><p>Редактор кода в духе VS Code для Весёлого Гуся</p></header>
+<nav><a href="index.html">Главная</a><a href="c.html">C</a><a href="cpp.html">C++</a><a href="python.html">Python</a><a href="nova.html">Nova</a><a href="java.html">Java</a><a href="web.html">HTML/CSS/JS</a><a href="barnix.html">Barnix API</a><a href="shell.html">Оболочка и brm</a></nav>
+<main>
+<p>Слева — панель действий: <b>Проводник</b> (папка проекта), <b>Поиск</b> по файлам и <b>Запуск</b>. Сверху вкладки
+открытых файлов, справа мини-карта, внизу панель «Проблемы / Вывод / Терминал» и синяя строка состояния.
+Открытые файлы и папка запоминаются; несохранённые правки ждут в памяти до следующего открытия окна.</p>
+<h2>Главное</h2>
+<table>
+<tr><th>Клавиши</th><th>Что делают</th></tr>
+<tr><td><b>Ctrl+P</b></td><td>перейти к файлу проекта (по части имени)</td></tr>
+<tr><td><b>Ctrl+Shift+P</b></td><td>палитра команд — все действия редактора</td></tr>
+<tr><td><b>F5</b></td><td>запуск: C/C++ собираются GCC и запускаются, Python — в отладчике, HTML открывается в Гусь.Веб</td></tr>
+<tr><td><b>Ctrl+F5</b></td><td>запуск без отладчика</td></tr>
+<tr><td><b>Ctrl+`</b></td><td>терминал внизу: команды и программы работают прямо в нём; <code>code ФАЙЛ</code> открывает файл</td></tr>
+<tr><td><b>F8</b></td><td>следующая ошибка из «Проблем» (щелчок по ошибке тоже переходит к строке)</td></tr>
+<tr><td><b>F1</b></td><td>справка по языку текущего файла</td></tr>
+<tr><td><b>Ctrl+B</b>, <b>Ctrl+J</b></td><td>скрыть/показать боковую и нижнюю панели (границу нижней можно тянуть мышью)</td></tr>
+</table>
+<h2>Файлы</h2>
+<table>
+<tr><td><b>Ctrl+N</b>, <b>Ctrl+O</b>, <b>Ctrl+S</b>, <b>Ctrl+Shift+S</b></td><td>новый, открыть, сохранить, сохранить как</td></tr>
+<tr><td><b>Ctrl+K Ctrl+O</b></td><td>открыть папку проекта</td></tr>
+<tr><td><b>Ctrl+K S</b></td><td>сохранить все</td></tr>
+<tr><td><b>Ctrl+W</b>, <b>Ctrl+Tab</b></td><td>закрыть вкладку, следующая вкладка</td></tr>
+<tr><td>Проводник: <b>F2</b>, <b>Delete</b>, значки сверху</td><td>переименовать, удалить, новый файл / папка</td></tr>
+</table>
+<h2>Правка</h2>
+<table>
+<tr><td><b>Ctrl+F</b>, <b>Ctrl+H</b></td><td>найти, заменить (Enter — по одному, «All» — все; Aa — регистр)</td></tr>
+<tr><td><b>Ctrl+Shift+F</b></td><td>поиск по всем файлам проекта</td></tr>
+<tr><td><b>Ctrl+G</b></td><td>перейти к строке</td></tr>
+<tr><td><b>Ctrl+/</b></td><td>закомментировать строки</td></tr>
+<tr><td><b>Alt+↑ / Alt+↓</b></td><td>перенести строки</td></tr>
+<tr><td><b>Ctrl+Shift+D</b>, <b>Ctrl+Shift+K</b></td><td>дублировать, удалить строку</td></tr>
+<tr><td><b>Ctrl+D</b>, <b>Ctrl+L</b></td><td>выделить слово и следующее такое же; выделить строку</td></tr>
+<tr><td><b>Tab</b> / <b>Shift+Tab</b>, <b>Ctrl+]</b> / <b>Ctrl+[</b></td><td>отступ строк</td></tr>
+<tr><td><b>Ctrl+Z</b>, <b>Ctrl+Y</b></td><td>отменить, повторить</td></tr>
+</table>
+<h2>Подсказки (IntelliSense)</h2>
+<p>Пока вы печатаете, под курсором появляется список: ключевые слова и функции языка, слова из файла,
+а после точки — члены модуля или объекта (<code>math.</code>, <code>os.path.</code>, <code>"текст".</code>, <code>std::</code>).
+Буквы можно пропускать: <code>prt</code> найдёт <code>print</code>. Над вызовом функции показываются её параметры.</p>
+<table>
+<tr><td><b>Ctrl+Space</b></td><td>показать подсказки</td></tr>
+<tr><td><b>↑ / ↓</b>, <b>PgUp / PgDn</b></td><td>выбор</td></tr>
+<tr><td><b>Tab</b> или <b>Enter</b></td><td>вставить (функция — со скобками, шаблон — с отступами: <code>for</code>, <code>def</code>, <code>if</code>, <code>main</code>…)</td></tr>
+<tr><td><b>Esc</b></td><td>закрыть</td></tr>
+</table>
+<h2>Отладчик Python</h2>
+<p><b>F9</b> или щелчок по полю с номерами строк ставит красную точку останова. <b>F5</b> в Python-файле запускает отладчик:
+слева исходник со стрелкой на текущей строке, ниже переменные, стек вызовов и вывод программы. Команды пишутся внизу:</p>
+<table>
+<tr><td><code>n</code></td><td>следующая строка</td></tr>
+<tr><td><code>s</code>, <code>o</code></td><td>войти в функцию, выйти из неё</td></tr>
+<tr><td><code>c</code></td><td>продолжить до точки останова</td></tr>
+<tr><td><code>b 12</code></td><td>поставить или убрать точку на строке 12 (точки возвращаются в редактор)</td></tr>
+<tr><td><code>p выражение</code>, <code>w выражение</code></td><td>посчитать; следить за значением на каждом шаге</td></tr>
+<tr><td><code>q</code>, <b>Enter</b></td><td>остановить; повторить прошлую команду</td></tr>
+</table>
+<p>Скобки и кавычки закрываются сами, парная скобка обводится рамкой, Enter сохраняет отступ.
+Подсветка: C, C++, Python, Nova, JavaScript, HTML, CSS, JSON, Markdown, Shell.</p>
+<p>Если компилятора или Python нет, Barnix Code откроет BarnStore с нужным пакетом.</p>
+</main></body></html>

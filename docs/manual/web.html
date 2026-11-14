@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>HTML, CSS и JavaScript</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<header><h1>HTML, CSS и JavaScript</h1><p>Страницы и игры для Гусь.Веб</p></header>
+<nav><a href="index.html">Главная</a><a href="c.html">C</a><a href="cpp.html">C++</a><a href="python.html">Python</a><a href="nova.html">Nova</a><a href="java.html">Java</a><a href="web.html">HTML/CSS/JS</a><a href="barnix.html">Barnix API</a><a href="shell.html">Оболочка и brm</a></nav>
+<main>
+<p>Гусь.Веб открывает файлы с диска: напишите страницу в Блокноте или IDE, сохраните как
+<code>/home/ИМЯ/index.html</code> и откройте её адресом <code>file:///home/ИМЯ/index.html</code>
+(или Файл → Открыть файл). <b>F5</b> перезагружает страницу после правок.</p>
+<h2>Каркас страницы</h2>
+<pre><code>&lt;!DOCTYPE html&gt;
+&lt;html lang="ru"&gt;
+&lt;head&gt;
+  &lt;meta charset="utf-8"&gt;
+  &lt;title&gt;Моя страница&lt;/title&gt;
+  &lt;style&gt;
+    body { font-family: sans-serif; margin: 24px; background: #f4f6fa; }
+    .card { background: #fff; border-radius: 10px; padding: 12px; }
+  &lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+  &lt;div class="card"&gt;&lt;h1&gt;Привет!&lt;/h1&gt;&lt;button id="b"&gt;Нажми&lt;/button&gt;&lt;/div&gt;
+  &lt;script&gt;
+    document.getElementById('b').addEventListener('click', e =&gt; e.target.textContent = 'Га-га!');
+  &lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+<h2>Что поддерживает движок</h2>
+<table>
+<tr><th>HTML5</th><td>заголовки, абзацы, списки, таблицы, ссылки, формы (<code>input</code>, <code>select</code>, <code>textarea</code>), картинки PNG</td></tr>
+<tr><th>CSS3</th><td>селекторы и каскад, переменные <code>--цвет</code>, <code>flex</code>, <code>grid</code>, <code>float</code>, позиционирование, градиенты, скругления, <code>@media</code></td></tr>
+<tr><th>JavaScript</th><td>QuickJS (ES2023): DOM, события, <code>setTimeout</code>, <code>requestAnimationFrame</code>, <code>localStorage</code>, <code>fetch</code></td></tr>
+<tr><th>Графика</th><td><code>&lt;canvas&gt;</code> с Canvas2D; WebGL пока нет</td></tr>
+<tr><th>Нет</th><td>JPEG, GIF, SVG, видео и звук на страницах</td></tr>
+</table>
+<h2>Canvas: игровой цикл</h2>
+<pre><code>&lt;canvas id="c" width="320" height="200"&gt;&lt;/canvas&gt;
+&lt;script&gt;
+const ctx = document.getElementById('c').getContext('2d');
+let x = 0;
+const keys = {};
+addEventListener('keydown', e =&gt; keys[e.key] = true);
+addEventListener('keyup', e =&gt; keys[e.key] = false);
+function frame() {
+  if (keys.ArrowRight) x += 2;
+  if (keys.ArrowLeft) x -= 2;
+  ctx.fillStyle = '#123'; ctx.fillRect(0, 0, 320, 200);
+  ctx.fillStyle = '#fc0'; ctx.fillRect(x, 90, 20, 20);
+  requestAnimationFrame(frame);
+}
+frame();
+&lt;/script&gt;</code></pre>
+<p>Большой пример — игра на Three.js: <a href="file:///usr/share/gouse/examples/three-game.html">three-game.html</a>.</p>
+<h2>Шпаргалка JavaScript</h2>
+<pre><code>const list = [3, 1, 2];
+list.sort((a, b) =&gt; a - b);
+const doubled = list.map(x =&gt; x * 2);
+const user = { name: 'Гусь', age: 3 };
+const text = `${user.name}: ${user.age} года`;
+for (const [key, value] of Object.entries(user)) console.log(key, value);
+document.querySelector('h1').textContent = text;
+localStorage.setItem('record', '100');</code></pre>
+</main></body></html>

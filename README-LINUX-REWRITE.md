@@ -14,13 +14,11 @@ yet**.
 
 ## Executable formats
 
-Static, little-endian ELF32 i386 `ET_EXEC` is supported. A Linux image may use
-the original 16–20 MiB window or a 4 MiB-aligned virtual window starting at
-32 MiB or above and ending below or at `0xc0000000`. Standard linker addresses
-such as `0x08048000` work: pages map to the reserved physical arena, not to RAM
-at that numerical virtual address. Every load segment must fit in that window,
-with the final 64 KiB reserved for the stack. TLS, PIE, ELF interpreters and
-images exceeding these limits are rejected before loading.
+Static, little-endian ELF32 i386 `ET_EXEC` is supported. Ordinary Linux images
+use a 4 MiB process window, including programs linked near `0x08048000`.
+Large static programs can use the 256 MiB window at `0x80000000`, with an 8 MiB
+stack. The virtual addresses map to reserved physical RAM. ELF interpreters,
+PIE, ELF64 and images exceeding the window are rejected before loading.
 
 Linux programs use OSABI 0 (System V) or 3 (Linux), ABI version 0. Rebuilt legacy
 Barnix programs carry OSABI 255 (standalone) and ABI version 5, set by
@@ -69,6 +67,9 @@ in pipelines or redirections.
   Program headers are copied to the stack if they are not mapped by PT_LOAD.
 - Regular-file I/O, shared positions through `dup/dup2`, a subset of `fcntl`,
   scatter/gather I/O, `chdir/getcwd`, bounded `brk`, basic IDs and `uname`.
+  Linux i386 `stat64`, `lstat64` and `fstat64` return ext2 metadata for files
+  and directories; `fstat64` also identifies terminal and pipe descriptors.
+  `open` accepts `O_LARGEFILE`.
 - Anonymous `pipe`/`pipe2` with 4 KiB buffers, blocking `read/write/readv/writev`,
   `O_NONBLOCK`, `O_CLOEXEC`, `F_GETPIPE_SZ` and `FIONREAD`. Writes up to 4096 bytes
   (including all vectors of a `writev`) are atomic. Larger blocking writes
@@ -77,7 +78,7 @@ in pipelines or redirections.
   Forked and duplicated descriptors keep endpoints alive until their last
   reference closes, including automatic closes on exit and exec. A write with
   no readers terminates the writer with the default SIGPIPE action (status 13
-  for `waitpid`, 141 for the launcher). Signal handlers and masks are absent.
+  for `waitpid`, 141 for the launcher). General signal delivery is incomplete.
   There are at most 24 pipes per launch and 16 descriptors per process.
 - Read-only directory descriptors and Linux i386 `getdents` records, including
   correct name offsets, record alignment, directory types and small-buffer errors.
@@ -92,9 +93,9 @@ in pipelines or redirections.
   Exited children retain wait status until reaped. User faults terminate only
   the affected process, currently with SIGSEGV status.
 - There are three process slots. Scheduling happens on yield, blocking wait,
-  pipe I/O that must wait, exit or a user exception; the child runs first after fork. This is not timer
-  preemption. Each saved address space occupies 4 MiB, reserved at boot by the
-  linker. Use **at least 64 MiB RAM** (the default VM has 256 MiB).
+  pipe I/O that must wait, exit or a user exception; the child runs first after fork.
+  There is no timer preemption. Toolchain processes reserve 256 MiB per saved
+  address space; use **at least 2 GiB RAM** for the GCC image.
 - The synchronous launch returns to Bssh when no runnable processes remain;
   Bssh's cwd is restored then. Background jobs, full init/orphan lifecycle and
   sessions are not yet supported. Unsupported operations fail explicitly.
@@ -110,6 +111,7 @@ make test-exec             # fork/wait/exec, environment, FD inheritance and fai
 make test-pipe             # Linux/Barnix pipes, exec pipeline, normal ISO and deadlock recovery
 make test-pipeline         # Bssh syntax, native sh comparison, pipes/redirections in the ISO
 make test-linux            # same ELF on Linux and Barnix, plus fault recovery
+make test-linux-large-loader # 1 MiB ELF through execve and the normal launcher
 make test-linux-commands   # all ten migrated command binaries on Linux
 make test-linux-shell      # ./ launch, commands, legacy programs in the same VM
 make test test-elf         # filesystem interoperability and ELF validation
@@ -124,23 +126,54 @@ image with `scripts/install_apps.py`.
 
 ## Remaining work for Bash
 
-Timer preemption, `clone`, general signal delivery/handlers, job control and
-TTY/termios are still absent. A CPU-bound process cannot be preempted. Initial
-Bssh launches have an empty environment; exec receives the environment passed
-by its caller. TLS, complete libc startup support and memory allocation beyond
-the bounded `brk` remain to be implemented. The user window is writable/executable
-without per-segment permissions. FPU/SIMD context switching is not implemented;
-current userland uses integer-only freestanding builds. `execve` currently accepts supported static ELF
-only: scripts with shebangs, dynamic interpreters and set-ID execution are absent.
+Timer preemption, general signal delivery, job control and TTY/termios remain
+incomplete. A CPU-bound process cannot be preempted. `clone` covers the
+process-creation form used by glibc `posix_spawn`, not general Linux threading.
+TLS and FPU/SSE context are supported for static glibc, but the user window
+still has limited memory protection semantics. `execve` accepts supported
+static ELF only: scripts with shebangs, dynamic interpreters and set-ID
+execution are absent.
 Longer pipelines, descriptor redirections, here-documents, command lists and
 shell expansions are not implemented in Bssh. Terminal reads still block in
 the kernel; pipeline sources should use files/input redirection when input is needed.
 Named FIFOs, `poll/select`, asynchronous pipe I/O and pipe resizing are absent.
 
-Ext2 still limits files to 268 KiB and the volume to 2 MiB. File descriptions
+Ext2 currently limits files to 1 GiB and the volume to 5 GiB. File descriptions
 store absolute paths rather than inode references; rename/unlink semantics,
 permissions, special files, symlinks and precise filesystem errno mapping need
-further work. These limits prevent loading a normal Bash binary today.
+further work. Together with the ABI gaps above, these limitations prevent
+running a normal Bash binary today.
+
+## GCC inside Barnix
+
+Barnix can run static i386 GCC 16.2.0 and binutils 2.47 in its Linux ABI. The
+toolchain image contains `gcc`, `g++`, `cc1`, `cc1plus`, `as`, `ld`, headers,
+32-bit glibc archives, and libstdc++ archives. GCC uses a 256 MiB process
+window starting at `0x80000000`; the guest needs at least 2 GiB RAM for the
+compiler, its child processes, and the filesystem image. Native compilation
+requires static output placed in that window:
+
+```sh
+linux /usr/bin/gcc -static -no-pie -Wl,-Ttext-segment=0x80000000 -o hello hello.c
+linux /usr/bin/g++ -std=c++23 -static -no-pie -Wl,-Ttext-segment=0x80000000 -o hello-cpp hello.cpp
+```
+
+Build the tool binaries from local upstream tarballs, then create the separate
+384 MiB live image. The host also needs 32-bit glibc and libstdc++ development
+headers and static archives.
+
+```sh
+python3 scripts/build_gcc_toolchain.py --sources /path/to/tarballs --work /path/to/build --jobs 4
+make live-ext2-gcc.img GCC_BUILD=/path/to/build/gcc-build/gcc BINUTILS_BUILD=/path/to/build/binutils-build
+make barnix-gcc.iso GCC_BUILD=/path/to/build/gcc-build/gcc BINUTILS_BUILD=/path/to/build/binutils-build
+make run-cd-gcc
+```
+
+`python3 tests/linux_gcc_stdlib_test.py --gcc-build ... --binutils-build ...`
+checks C/glibc and C++/libstdc++ compilation and execution inside QEMU. The
+current ABI supports single-threaded static i386 programs; dynamic linking,
+PIE, ELF64, and general Linux process compatibility remain incomplete. `bcc`
+is a separate small self-hosted compiler.
 
 ## Removed obsolete code
 

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>Оболочка и brm</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<header><h1>Оболочка и пакеты</h1><p>Команды Barnix, brm и BarnStore</p></header>
+<nav><a href="index.html">Главная</a><a href="c.html">C</a><a href="cpp.html">C++</a><a href="python.html">Python</a><a href="nova.html">Nova</a><a href="java.html">Java</a><a href="web.html">HTML/CSS/JS</a><a href="barnix.html">Barnix API</a><a href="shell.html">Оболочка и brm</a></nav>
+<main>
+<h2>Где вводить команды</h2>
+<p>В текстовой оболочке после входа или в <b>Gouse Prompt</b> в Весёлом Гусе. В Prompt любые программы — даже игры
+и редакторы — работают прямо в его окне; <code>full программа</code> отдаёт ей весь экран.</p>
+<h2>Файлы</h2>
+<table>
+<tr><td><code>ls</code>, <code>dir</code></td><td>список файлов</td><td><code>cd папка</code></td><td>сменить папку</td></tr>
+<tr><td><code>cat файл</code></td><td>показать файл</td><td><code>macro файл</code></td><td>редактор</td></tr>
+<tr><td><code>cp a b</code></td><td>копировать</td><td><code>mv a b</code></td><td>переместить</td></tr>
+<tr><td><code>rm файл</code></td><td>удалить</td><td><code>mkdir</code>, <code>rmdir</code></td><td>папки</td></tr>
+<tr><td><code>df</code></td><td>место на дисках</td><td><code>devices</code></td><td>устройства</td></tr>
+</table>
+<h2>Пакеты: brm</h2>
+<pre><code>sudo brm -Sy            обновить список пакетов
+brm -Ss игра            поиск
+sudo brm -S gcc gsnake  установить
+sudo brm -Syu           обновить всю систему
+brm -Q                  что установлено;  brm -Ql gcc  его файлы
+sudo brm -R gsnake      удалить</code></pre>
+<p>В Весёлом Гусе всё то же делает <b>BarnStore</b>: категории, поиск, кнопки «Установить», «Удалить», «Обновить всё».
+Системные программы Barnix тоже пакеты: так они обновляются.</p>
+<h2>sudo</h2>
+<p><code>sudo команда</code> выполняет её от имени root, спросив пароль. В Gouse Prompt пароль запоминается на 5 минут.</p>
+<h2>Буфер обмена</h2>
+<table>
+<tr><th>Где</th><th>Как</th></tr>
+<tr><td>оболочка</td><td><b>Ctrl+V</b> — вставить, <b>Ctrl+C</b> / <b>Ctrl+X</b> — скопировать / вырезать набранную строку</td></tr>
+<tr><td>macro</td><td><b>Ctrl+C</b> / <b>Ctrl+X</b> — строка, <b>Ctrl+V</b> — вставить</td></tr>
+<tr><td>Gouse Prompt</td><td>выделить мышью, <b>Ctrl+C</b>; вставка — <b>Ctrl+V</b> или правой кнопкой</td></tr>
+<tr><td>окна Гуся</td><td><b>Ctrl+C</b>, <b>Ctrl+X</b>, <b>Ctrl+V</b> в любом поле ввода и редакторе</td></tr>
+</table>
+<p>Сочетания работают и в русской раскладке.</p>
+</main></body></html>

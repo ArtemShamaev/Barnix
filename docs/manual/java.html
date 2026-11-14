@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>Java в Barnix</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<header><h1>Java</h1><p>BJVM — собственная виртуальная машина Java в Barnix</p></header>
+<nav><a href="index.html">Главная</a><a href="c.html">C</a><a href="cpp.html">C++</a><a href="python.html">Python</a><a href="nova.html">Nova</a><a href="java.html">Java</a><a href="web.html">HTML/CSS/JS</a><a href="barnix.html">Barnix API</a><a href="shell.html">Оболочка и brm</a></nav>
+<main>
+<p>Barnix запускает готовые JAR-файлы с байткодом <b>Java 8</b> (класс-файлы версии до 52).
+Компилятор <code>javac</code> в системе не работает: собирайте программу на компьютере разработчика
+(<code>javac --release 8</code>) или пишите на <a href="nova.html">Nova</a>, а сюда переносите <code>.jar</code>.</p>
+<pre><code>java -jar game.jar
+java -cp classes Main</code></pre>
+<h2>Minecraft Alpha</h2>
+<p>В Весёлом Гусе есть <b>Лаунчер Alpha</b>: положите <code>mc.jar</code> (клиент a1.2.6) и, если есть, <code>mod.jar</code>
+в папку игры (по умолчанию <code>/mc</code>), введите ник и нажмите «Играть». Миры и настройки игры лежат в
+<code>/mc/minecraft</code>.</p>
+<h2>Пример</h2>
+<pre><code>public class Main {
+    public static void main(String[] args) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 1; i &lt;= 5; i++) sb.append(i).append(' ');
+        System.out.println("Числа: " + sb);
+    }
+}</code></pre>
+<pre><code>javac --release 8 Main.java          # на компьютере разработчика
+jar cfe main.jar Main Main.class
+java -jar main.jar                   # в Barnix</code></pre>
+<h2>Что есть в BJVM</h2>
+<ul>
+<li>интерпретатор байткода, сборщик мусора, потоки (<code>Thread</code>, <code>synchronized</code>);</li>
+<li>основные классы <code>java.lang</code>, <code>java.util</code> (коллекции), <code>java.io</code> (файлы);</li>
+<li>LWJGL 2 и OpenGL для игр — цель: запуск Minecraft Alpha с модами.</li>
+</ul>
+<h2>Чего нет</h2>
+<ul><li>Swing и AWT-окон, сети через <code>java.net</code>, JIT-компиляции.</li></ul>
+</main></body></html>

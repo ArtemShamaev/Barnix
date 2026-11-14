@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>Barnix API (BDK)</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<header><h1>Barnix API</h1><p>Нативные программы: графика, клавиатура, мышь, звук, сеть</p></header>
+<nav><a href="index.html">Главная</a><a href="c.html">C</a><a href="cpp.html">C++</a><a href="python.html">Python</a><a href="nova.html">Nova</a><a href="java.html">Java</a><a href="web.html">HTML/CSS/JS</a><a href="barnix.html">Barnix API</a><a href="shell.html">Оболочка и brm</a></nav>
+<main>
+<p>Нативная программа Barnix получает таблицу функций ядра (<code>barnix-&gt;...</code>) и работает без Linux-слоя:
+так устроены Гусь, игры из BarnStore, Barnocraft. Собирает их <b>BDK</b> (Barnix Developer Kit) на компьютере
+разработчика: <code>make bdk</code> в исходниках Barnix, затем <code>python3 BDK/tools/build.py папка_проекта</code>.
+Готовый <code>.elf</code> ставится в систему командой <code>sudo brm -U программа.elf</code>.</p>
+<h2>Окно и игровой цикл (barnix_gfx.h)</h2>
+<pre><code>#define BARNIX_APP_NAME "demo.elf"
+#include &lt;barnix_gfx.h&gt;
+
+static unsigned int pixels[320 * 200];
+
+int main(void)
+{
+    BgxCanvas screen;
+    if (bgx_open(&amp;screen, pixels, 320, 200)) return 1;
+    int x = 0;
+    for (;;) {
+        BgxEvent e;
+        while (bgx_poll(&amp;e))
+            if (e.type == BGX_PRESS &amp;&amp; e.code == BGX_KEY_ESC) { bgx_close(); return 0; }
+        if (bgx_key_held(0xcd)) x++;          /* стрелка вправо */
+        bgx_clear(&amp;screen, 0x102030);
+        bgx_fill(&amp;screen, x, 90, 20, 20, 0xffcc00);
+        bgx_text(&amp;screen, 8, 8, "Esc - выход", 0xffffff, 1);
+        bgx_present(&amp;screen);
+        barnix-&gt;sleep_ms(16);
+    }
+}</code></pre>
+<table>
+<tr><th>Функция</th><th>Что делает</th></tr>
+<tr><td><code>bgx_fill, bgx_frame, bgx_blend</code></td><td>прямоугольники, рамки, полупрозрачность</td></tr>
+<tr><td><code>bgx_image, bgx_upscale</code></td><td>картинки и увеличение</td></tr>
+<tr><td><code>bgx_text, bgx_text_width</code></td><td>текст UTF-8 (и кириллица)</td></tr>
+<tr><td><code>bgx_poll, bgx_key_held, bgx_mouse</code></td><td>клавиши и мышь</td></tr>
+<tr><td><code>bgx_millis</code></td><td>время в миллисекундах</td></tr>
+<tr><td><code>barnix_sound.h</code></td><td>звуки 48 кГц, до 16 одновременно</td></tr>
+<tr><td><code>barnix_net.h</code></td><td>HTTP и HTTPS, TCP</td></tr>
+<tr><td><code>barnix_opengl.h</code>, <code>GL/gl.h</code></td><td>программный OpenGL 1.x</td></tr>
+</table>
+<h2>Файлы и система</h2>
+<pre><code>barnix-&gt;write("/home/user/save.txt", text, length);
+int size = barnix-&gt;size("/home/user/save.txt");
+barnix-&gt;read("/home/user/save.txt", 0, buffer, size);
+const char *who = barnix-&gt;current_user();</code></pre>
+<h2>Буфер обмена (ABI 14)</h2>
+<p>Один буфер на всю систему: оболочка, macro, Весёлый Гусь и ваши программы.</p>
+<pre><code>barnix-&gt;clipboard_set("скопировано", 22);       /* длина в байтах */
+char text[1024];
+int length = barnix-&gt;clipboard_get(text, sizeof text);
+unsigned int changed = barnix-&gt;clipboard_serial();  /* меняется при каждом копировании */</code></pre>
+<h2>Программа внутри другой (ABI 13–14)</h2>
+<p><code>barnix-&gt;run()</code> запускает программу и собирает её вывод; <code>run_area(x, y, w, h)</code> перед этим
+показывает её в прямоугольнике вашего кадра — так Gouse Prompt и BarnStore запускают программы в своём окне.</p>
+</main></body></html>
